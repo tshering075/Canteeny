@@ -1,8 +1,6 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Box,
-  Button,
   Card,
   CardContent,
   Grid,
@@ -17,7 +15,6 @@ import { useAppState } from '../context/AppContext';
 import { getTopMeals } from '../services/reportService';
 
 function Dashboard() {
-  const navigate = useNavigate();
   const { sales, customers } = useAppState();
 
   const today = new Date().toISOString().split('T')[0];
