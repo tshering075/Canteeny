@@ -1,3 +1,24 @@
+# Coca-Cola Canteen Management
+
+Dashboard app for meal sales, customers, and reports. Uses React 19 + Material UI with optional Supabase backend.
+
+## Supabase Setup
+
+See **[SUPABASE_SETUP.md](./SUPABASE_SETUP.md)** for detailed steps. Summary:
+
+1. **Get credentials** – Supabase Dashboard → Settings → API → copy Project URL and anon key.
+2. **Create `.env`** in project root:
+   ```
+   REACT_APP_SUPABASE_URL=https://your-project.supabase.co
+   REACT_APP_SUPABASE_ANON_KEY=your_anon_key_here
+   ```
+3. **Run migration** – Copy `supabase/migrations/001_initial_schema.sql` into Supabase SQL Editor and run it.
+4. **Restart app** – `npm start`
+
+When Supabase is configured and tables are empty, sample data seeds automatically.
+
+---
+
 # Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
