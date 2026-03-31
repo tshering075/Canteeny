@@ -34,12 +34,30 @@ function buildSalePayload(data) {
 
 export async function getSales() {
   if (supabase) {
-    const { data, error } = await supabase
-      .from('sales')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (!error && data) {
-      const list = data.map(toSale);
+    const pageSize = 1000;
+    let from = 0;
+    const rows = [];
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('sales')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) break;
+      if (!data || data.length === 0) {
+        hasMore = false;
+      } else {
+        rows.push(...data);
+        hasMore = data.length === pageSize;
+        from += pageSize;
+      }
+    }
+
+    if (rows.length > 0) {
+      const list = rows.map(toSale);
       setInStorage(STORAGE_KEYS.SALES, list);
       return list;
     }
