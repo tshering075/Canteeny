@@ -7,12 +7,9 @@ import {
   Dialog,
   DialogContent,
   DialogTitle,
-  FormControl,
   IconButton,
-  InputLabel,
-  MenuItem,
+  InputAdornment,
   Paper,
-  Select,
   Table,
   TableBody,
   TableCell,
@@ -29,6 +26,7 @@ import RemoveIcon from '@mui/icons-material/Remove';
 import PointOfSaleIcon from '@mui/icons-material/PointOfSale';
 import HistoryIcon from '@mui/icons-material/History';
 import CloseIcon from '@mui/icons-material/Close';
+import SearchIcon from '@mui/icons-material/Search';
 import { useAppState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as salesService from '../services/salesService';
@@ -50,7 +48,8 @@ function Sales() {
     }
     return today;
   });
-  const [dateFilter, setDateFilter] = useState('today');
+  const [historyDate, setHistoryDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [historySearch, setHistorySearch] = useState('');
   const [mealSearch, setMealSearch] = useState('');
   const [selectedSale, setSelectedSale] = useState(null);
   const [selectedItemIndices, setSelectedItemIndices] = useState(new Set());
@@ -63,7 +62,6 @@ function Sales() {
     }
   }, [saleDate, saleDateStorageKey]);
 
-  const today = new Date().toISOString().split('T')[0];
   const activeMeals = meals.filter((m) => m.isActive !== false);
 
   const mealOptions = useMemo(() => {
@@ -77,18 +75,17 @@ function Sales() {
   }, [activeMeals, mealSearch]);
 
   const filteredSales = useMemo(() => {
+    const q = historySearch.toLowerCase().trim();
     const list = sales.filter((s) => {
-      if (dateFilter === 'today') return s.date === today;
-      if (dateFilter === 'week') {
-        const weekAgo = new Date();
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        return new Date(s.date) >= weekAgo;
-      }
-      if (dateFilter === 'month') return s.date.startsWith(today.slice(0, 7));
-      return true;
+      if (historyDate && s.date !== historyDate) return false;
+      if (!q) return true;
+      const customer = (s.customerName || '').toLowerCase();
+      const dateStr = (s.date || '').toLowerCase();
+      const totalStr = String(s.totalAmount ?? '');
+      return customer.includes(q) || dateStr.includes(q) || totalStr.includes(q);
     });
     return [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  }, [sales, dateFilter, today]);
+  }, [sales, historyDate, historySearch]);
 
   const addToCart = (meal) => {
     const existing = cart.find((c) => c.mealId === meal.id);
@@ -435,35 +432,45 @@ function Sales() {
             minHeight: 400,
           }}
         >
-          <Box
-            sx={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              mb: 2,
-              flexWrap: 'wrap',
-              gap: 2,
-            }}
-          >
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Box sx={{ mb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
               <HistoryIcon color="primary" />
               <Typography variant="h6" fontWeight={600}>
                 Sales History
               </Typography>
             </Box>
-            <FormControl size="small" sx={{ minWidth: 140 }}>
-              <InputLabel>Period</InputLabel>
-              <Select
-                value={dateFilter}
-                label="Period"
-                onChange={(e) => setDateFilter(e.target.value)}
-              >
-                <MenuItem value="today">Today</MenuItem>
-                <MenuItem value="week">Last 7 Days</MenuItem>
-                <MenuItem value="month">This Month</MenuItem>
-                <MenuItem value="all">All</MenuItem>
-              </Select>
-            </FormControl>
+            <Box
+              sx={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 2,
+                alignItems: 'center',
+              }}
+            >
+              <TextField
+                type="date"
+                size="small"
+                label="Date"
+                value={historyDate}
+                onChange={(e) => setHistoryDate(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+                sx={{ minWidth: 160 }}
+              />
+              <TextField
+                size="small"
+                placeholder="Search customer, date, or amount..."
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                sx={{ flex: '1 1 200px', minWidth: 180 }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon fontSize="small" color="action" />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Box>
           </Box>
 
           <TableContainer sx={{ flex: 1, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
@@ -481,7 +488,9 @@ function Sales() {
                   <TableRow>
                     <TableCell colSpan={4} align="center" sx={{ py: 8 }}>
                       <Typography color="text.secondary">
-                        No sales in this period
+                        {historySearch.trim()
+                          ? 'No sales match your search'
+                          : 'No sales on this date'}
                       </Typography>
                       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
                         Complete a sale to see it here
