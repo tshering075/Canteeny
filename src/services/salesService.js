@@ -1,5 +1,11 @@
 import { supabase } from '../lib/supabase';
-import { getFromStorage, setInStorage, generateId, STORAGE_KEYS } from './storage';
+import {
+  getFromStorage,
+  setInStorage,
+  removeFromStorage,
+  generateId,
+  STORAGE_KEYS,
+} from './storage';
 
 const toSale = (row) =>
   row
@@ -32,42 +38,44 @@ function buildSalePayload(data) {
   };
 }
 
+async function fetchSalesFromSupabase() {
+  const pageSize = 1000;
+  let from = 0;
+  const rows = [];
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from('sales')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) {
+      hasMore = false;
+    } else {
+      rows.push(...data);
+      hasMore = data.length === pageSize;
+      from += pageSize;
+    }
+  }
+
+  return rows.map(toSale);
+}
+
 export async function getSales() {
   if (supabase) {
-    const pageSize = 1000;
-    let from = 0;
-    const rows = [];
-    let hasMore = true;
-
-    while (hasMore) {
-      const { data, error } = await supabase
-        .from('sales')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .range(from, from + pageSize - 1);
-
-      if (error) break;
-      if (!data || data.length === 0) {
-        hasMore = false;
-      } else {
-        rows.push(...data);
-        hasMore = data.length === pageSize;
-        from += pageSize;
-      }
-    }
-
-    if (rows.length > 0) {
-      const list = rows.map(toSale);
-      setInStorage(STORAGE_KEYS.SALES, list);
-      return list;
-    }
+    const list = await fetchSalesFromSupabase();
+    // Supabase is the source of truth; drop any old full-list browser cache.
+    removeFromStorage(STORAGE_KEYS.SALES);
+    return list;
   }
   return getFromStorage(STORAGE_KEYS.SALES, []);
 }
 
 export async function addSale(data) {
   const payload = buildSalePayload(data);
-  let result = null;
 
   if (supabase) {
     const { data: row, error } = await supabase
@@ -75,22 +83,23 @@ export async function addSale(data) {
       .insert(payload)
       .select()
       .single();
-    if (!error) result = toSale(row);
+    if (error) throw new Error(error.message);
+    return toSale(row);
   }
 
   const sales = getFromStorage(STORAGE_KEYS.SALES, []);
   const sale = {
-    id: result?.id || generateId(),
+    id: generateId(),
     customerId: payload.customer_id,
     customerName: payload.customer_name,
     items: payload.items,
     totalAmount: payload.total_amount,
     date: payload.date,
-    createdAt: result?.createdAt || new Date().toISOString(),
+    createdAt: new Date().toISOString(),
   };
   sales.push(sale);
   setInStorage(STORAGE_KEYS.SALES, sales);
-  return result || sale;
+  return sale;
 }
 
 export async function updateSale(id, data) {
@@ -113,15 +122,8 @@ export async function updateSale(id, data) {
       .eq('id', id)
       .select()
       .single();
-    if (!error) {
-      const sales = getFromStorage(STORAGE_KEYS.SALES, []);
-      const idx = sales.findIndex((s) => s.id === id);
-      if (idx >= 0) {
-        sales[idx] = toSale(row);
-        setInStorage(STORAGE_KEYS.SALES, sales);
-      }
-      return toSale(row);
-    }
+    if (error) throw new Error(error.message);
+    return toSale(row);
   }
 
   const sales = getFromStorage(STORAGE_KEYS.SALES, []);
@@ -146,12 +148,11 @@ export async function updateSale(id, data) {
 
 export async function deleteSale(id) {
   if (supabase) {
-    try {
-      await supabase.from('sales').delete().eq('id', id);
-    } catch {
-      // Network error - still remove from localStorage
-    }
+    const { error } = await supabase.from('sales').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+    return true;
   }
+
   const sales = getFromStorage(STORAGE_KEYS.SALES, []).filter((s) => s.id !== id);
   setInStorage(STORAGE_KEYS.SALES, sales);
   return true;

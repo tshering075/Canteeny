@@ -18,7 +18,21 @@ export function getFromStorage(key, defaultValue = []) {
 }
 
 export function setInStorage(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (err) {
+    console.warn(`Failed to save ${key} to localStorage:`, err);
+    return false;
+  }
+}
+
+export function removeFromStorage(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch (_) {
+    // Ignore storage errors.
+  }
 }
 
 export function generateId() {
