@@ -2,7 +2,6 @@ import { supabase } from '../lib/supabase';
 import {
   getFromStorage,
   setInStorage,
-  removeFromStorage,
   generateId,
   STORAGE_KEYS,
 } from './storage';
@@ -38,6 +37,12 @@ function buildSalePayload(data) {
   };
 }
 
+const SALES_CACHE_LIMIT = 100;
+
+function cacheRecentSales(list) {
+  setInStorage(STORAGE_KEYS.SALES, list.slice(0, SALES_CACHE_LIMIT));
+}
+
 async function fetchSalesFromSupabase() {
   const pageSize = 1000;
   let from = 0;
@@ -66,10 +71,14 @@ async function fetchSalesFromSupabase() {
 
 export async function getSales() {
   if (supabase) {
-    const list = await fetchSalesFromSupabase();
-    // Supabase is the source of truth; drop any old full-list browser cache.
-    removeFromStorage(STORAGE_KEYS.SALES);
-    return list;
+    try {
+      const list = await fetchSalesFromSupabase();
+      cacheRecentSales(list);
+      return list;
+    } catch (err) {
+      console.warn('Failed to load sales from Supabase:', err);
+      return getFromStorage(STORAGE_KEYS.SALES, []);
+    }
   }
   return getFromStorage(STORAGE_KEYS.SALES, []);
 }

@@ -16,20 +16,31 @@ export function AppProvider({ children }) {
     setLoading(true);
     setError(null);
     try {
-      const [c, m, s] = await Promise.all([
+      const [cResult, mResult, sResult] = await Promise.allSettled([
         customerService.getCustomers(),
         mealService.getMeals(),
         salesService.getSales(),
       ]);
-      setCustomers(c || []);
-      setMeals(m || []);
-      setSales(s || []);
+
+      setCustomers(cResult.status === 'fulfilled' ? cResult.value || [] : []);
+      setMeals(mResult.status === 'fulfilled' ? mResult.value || [] : []);
+      setSales(sResult.status === 'fulfilled' ? sResult.value || [] : []);
+
+      const failed = [cResult, mResult, sResult].filter((r) => r.status === 'rejected');
+      if (failed.length > 0) {
+        const messages = failed.map((r) => r.reason?.message || 'Failed to load data');
+        const isNetwork = messages.some((m) =>
+          /failed to fetch|network|load failed/i.test(m)
+        );
+        setError(
+          isNetwork
+            ? 'Could not connect to the server. Check your internet connection and Supabase settings.'
+            : messages.join('; ')
+        );
+      }
     } catch (err) {
       console.error('loadData error:', err);
       setError(err.message || 'Failed to load data');
-      setCustomers([]);
-      setMeals([]);
-      setSales([]);
     } finally {
       setLoading(false);
     }
