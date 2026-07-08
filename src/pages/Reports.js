@@ -1,9 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Alert,
   Box,
   Button,
+  Checkbox,
   Dialog,
+  DialogActions,
   DialogContent,
+  DialogContentText,
   DialogTitle,
   FormControl,
   IconButton,
@@ -30,11 +34,17 @@ import SaveAltIcon from '@mui/icons-material/SaveAlt';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import CloseIcon from '@mui/icons-material/Close';
+import DeleteIcon from '@mui/icons-material/Delete';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import {
   getDailyReport,
   getMonthlyReportByCustomerDateRange,
+  getReportByDateRange,
 } from '../services/reportService';
 import { useAppState } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import * as salesService from '../services/salesService';
+import { addActivity } from '../services/activityService';
 import {
   downloadReportPDF,
   downloadReportExcel,
@@ -43,14 +53,24 @@ import {
 } from '../utils/exportReport';
 
 function Reports() {
-  const { sales, customers } = useAppState();
+  const { sales, customers, refreshData } = useAppState();
+  const { canManageUsers, currentUser } = useAuth();
   const [mode, setMode] = useState('daily');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [startDate, setStartDate] = useState(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
   );
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [deleteStartDate, setDeleteStartDate] = useState(
+    () => new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
+  );
+  const [deleteEndDate, setDeleteEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [search, setSearch] = useState('');
+  const [deleteSearch, setDeleteSearch] = useState('');
+  const [selectedSaleIds, setSelectedSaleIds] = useState(new Set());
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [detailCustomer, setDetailCustomer] = useState(null);
   const [saveMenuAnchor, setSaveMenuAnchor] = useState(null);
   const [billSaveMenuAnchor, setBillSaveMenuAnchor] = useState(null);
@@ -88,6 +108,86 @@ function Reports() {
     );
   }, [filteredByDepartment]);
 
+  const deleteRangeReport = useMemo(() => {
+    if (mode !== 'delete') return null;
+    return getReportByDateRange(deleteStartDate, deleteEndDate, sales);
+  }, [mode, deleteStartDate, deleteEndDate, sales]);
+
+  const deleteFilteredSales = useMemo(() => {
+    const list = deleteRangeReport?.sales || [];
+    const q = deleteSearch.toLowerCase().trim();
+    const filtered = q
+      ? list.filter((s) => (s.customerName || '').toLowerCase().includes(q))
+      : list;
+    return [...filtered].sort(
+      (a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date)
+    );
+  }, [deleteRangeReport, deleteSearch]);
+
+  const selectedDeleteSales = useMemo(
+    () => deleteFilteredSales.filter((s) => selectedSaleIds.has(s.id)),
+    [deleteFilteredSales, selectedSaleIds]
+  );
+
+  const selectedDeleteTotal = useMemo(
+    () => selectedDeleteSales.reduce((sum, s) => sum + (s.totalAmount || 0), 0),
+    [selectedDeleteSales]
+  );
+
+  const allDeleteVisibleSelected =
+    deleteFilteredSales.length > 0 &&
+    deleteFilteredSales.every((s) => selectedSaleIds.has(s.id));
+
+  const someDeleteVisibleSelected =
+    !allDeleteVisibleSelected && deleteFilteredSales.some((s) => selectedSaleIds.has(s.id));
+
+  const toggleSaleSelection = (id) => {
+    setSelectedSaleIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllDeleteSales = () => {
+    if (allDeleteVisibleSelected) {
+      setSelectedSaleIds((prev) => {
+        const next = new Set(prev);
+        deleteFilteredSales.forEach((s) => next.delete(s.id));
+        return next;
+      });
+    } else {
+      setSelectedSaleIds((prev) => {
+        const next = new Set(prev);
+        deleteFilteredSales.forEach((s) => next.add(s.id));
+        return next;
+      });
+    }
+  };
+
+  const handleDeleteSelectedSales = async () => {
+    const ids = selectedDeleteSales.map((s) => s.id);
+    if (ids.length === 0) return;
+
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      await salesService.deleteSales(ids);
+      addActivity(
+        currentUser?.userId || 'Unknown',
+        `Deleted ${ids.length} sale(s) from ${deleteStartDate} to ${deleteEndDate}`
+      );
+      setSelectedSaleIds(new Set());
+      setDeleteConfirmOpen(false);
+      refreshData();
+    } catch (err) {
+      setDeleteError(err.message || 'Failed to delete sales');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleReportSave = (format) => {
     setSaveMenuAnchor(null);
     if (format === 'pdf') downloadReportPDF(filteredByDepartment, filteredGrandTotal, startDate, endDate);
@@ -113,6 +213,7 @@ function Reports() {
           >
             <MenuItem value="daily">Daily Sales</MenuItem>
             <MenuItem value="monthly">Monthly Sales</MenuItem>
+            {canManageUsers && <MenuItem value="delete">Delete Sales</MenuItem>}
           </Select>
         </FormControl>
         {mode === 'daily' && (
@@ -142,14 +243,169 @@ function Reports() {
             />
           </Box>
         )}
+        {mode === 'delete' && (
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+            <TextField
+              type="date"
+              label="Start Date"
+              value={deleteStartDate}
+              onChange={(e) => {
+                setDeleteStartDate(e.target.value);
+                setSelectedSaleIds(new Set());
+              }}
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              type="date"
+              label="End Date"
+              value={deleteEndDate}
+              onChange={(e) => {
+                setDeleteEndDate(e.target.value);
+                setSelectedSaleIds(new Set());
+              }}
+              InputLabelProps={{ shrink: true }}
+            />
+          </Box>
+        )}
       </Box>
 
       <Paper sx={{ p: 3, borderRadius: 2 }}>
         <Typography variant="h6" gutterBottom>
           {mode === 'daily'
             ? `Daily Report - ${date}`
-            : `Monthly Report - ${startDate} to ${endDate}`}
+            : mode === 'monthly'
+              ? `Monthly Report - ${startDate} to ${endDate}`
+              : `Delete Sales - ${deleteStartDate} to ${deleteEndDate}`}
         </Typography>
+
+        {mode === 'delete' && (
+          <>
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              Selected sales will be permanently deleted from Supabase. This cannot be undone.
+            </Alert>
+
+            {deleteError && (
+              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setDeleteError('')}>
+                {deleteError}
+              </Alert>
+            )}
+
+            <Box
+              sx={{
+                display: 'flex',
+                gap: 2,
+                mb: 3,
+                flexWrap: 'wrap',
+                alignItems: 'center',
+              }}
+            >
+              <TextField
+                size="small"
+                placeholder="Search customer..."
+                value={deleteSearch}
+                onChange={(e) => setDeleteSearch(e.target.value)}
+                sx={{ minWidth: 240 }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={toggleSelectAllDeleteSales}
+                disabled={deleteFilteredSales.length === 0}
+              >
+                {allDeleteVisibleSelected ? 'Deselect all' : 'Select all'}
+              </Button>
+              <Button
+                variant="contained"
+                color="error"
+                startIcon={<DeleteSweepIcon />}
+                onClick={() => setDeleteConfirmOpen(true)}
+                disabled={selectedDeleteSales.length === 0 || deleting}
+              >
+                Delete selected ({selectedDeleteSales.length})
+              </Button>
+            </Box>
+
+            <Typography variant="body1" color="textSecondary" sx={{ mb: 2 }}>
+              {deleteFilteredSales.length} sale(s) in range · Nu{' '}
+              {(deleteRangeReport?.total || 0).toFixed(2)} total
+              {selectedDeleteSales.length > 0 &&
+                ` · ${selectedDeleteSales.length} selected (Nu ${selectedDeleteTotal.toFixed(2)})`}
+            </Typography>
+
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell padding="checkbox" sx={{ width: 48 }}>
+                      <Checkbox
+                        indeterminate={someDeleteVisibleSelected}
+                        checked={allDeleteVisibleSelected}
+                        onChange={toggleSelectAllDeleteSales}
+                        disabled={deleteFilteredSales.length === 0}
+                      />
+                    </TableCell>
+                    <TableCell>Date</TableCell>
+                    <TableCell>Time</TableCell>
+                    <TableCell>Customer</TableCell>
+                    <TableCell>Items</TableCell>
+                    <TableCell align="right">Total</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {deleteFilteredSales.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} align="center">
+                        No sales in this date range.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    deleteFilteredSales.map((sale) => (
+                      <TableRow
+                        key={sale.id}
+                        hover
+                        selected={selectedSaleIds.has(sale.id)}
+                        onClick={() => toggleSaleSelection(sale.id)}
+                        sx={{ cursor: 'pointer' }}
+                      >
+                        <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={selectedSaleIds.has(sale.id)}
+                            onChange={() => toggleSaleSelection(sale.id)}
+                          />
+                        </TableCell>
+                        <TableCell>{sale.date}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          {sale.createdAt
+                            ? new Date(sale.createdAt).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : '—'}
+                        </TableCell>
+                        <TableCell>{sale.customerName}</TableCell>
+                        <TableCell>
+                          {(sale.items || [])
+                            .map((i) => `${i.mealName} x${i.quantity}`)
+                            .join(', ') || '-'}
+                        </TableCell>
+                        <TableCell align="right">
+                          Nu {(sale.totalAmount || 0).toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </>
+        )}
 
         {mode === 'daily' && (
           <>
@@ -413,6 +669,31 @@ function Reports() {
             </TableContainer>
           )}
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteConfirmOpen} onClose={() => !deleting && setDeleteConfirmOpen(false)}>
+        <DialogTitle>Delete selected sales?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            You are about to permanently delete {selectedDeleteSales.length} sale(s) totaling Nu{' '}
+            {selectedDeleteTotal.toFixed(2)} from {deleteStartDate} to {deleteEndDate}. This will
+            remove them from Supabase and cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirmOpen(false)} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            startIcon={<DeleteIcon />}
+            onClick={handleDeleteSelectedSales}
+            disabled={deleting}
+          >
+            {deleting ? 'Deleting...' : 'Delete permanently'}
+          </Button>
+        </DialogActions>
       </Dialog>
 
     </Box>

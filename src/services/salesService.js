@@ -197,10 +197,30 @@ export async function deleteSale(id) {
   if (supabase) {
     const { error } = await supabase.from('sales').delete().eq('id', id);
     if (error) throw new Error(error.message);
+    removeSalesFromCache([id]);
     return true;
   }
 
-  const sales = getFromStorage(STORAGE_KEYS.SALES, []).filter((s) => s.id !== id);
-  setInStorage(STORAGE_KEYS.SALES, sales);
+  removeSalesFromCache([id]);
   return true;
+}
+
+function removeSalesFromCache(ids) {
+  const idSet = new Set(ids);
+  const sales = getFromStorage(STORAGE_KEYS.SALES, []).filter((s) => !idSet.has(s.id));
+  setInStorage(STORAGE_KEYS.SALES, sales);
+}
+
+export async function deleteSales(ids) {
+  if (!ids?.length) return 0;
+
+  const uniqueIds = [...new Set(ids)];
+
+  if (supabase) {
+    const { error } = await supabase.from('sales').delete().in('id', uniqueIds);
+    if (error) throw new Error(error.message);
+  }
+
+  removeSalesFromCache(uniqueIds);
+  return uniqueIds.length;
 }
