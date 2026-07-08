@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import * as customerService from '../services/customerService';
 import * as mealService from '../services/mealService';
 import * as salesService from '../services/salesService';
@@ -14,7 +14,7 @@ export function AppProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!isAuthenticated || isPlatformAdmin) {
       setLoading(false);
       return;
@@ -51,7 +51,7 @@ export function AppProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [isAuthenticated, isPlatformAdmin]);
 
   useEffect(() => {
     if (isAuthenticated && !isPlatformAdmin && currentUser?.tenantId) {
@@ -59,7 +59,7 @@ export function AppProvider({ children }) {
     } else {
       setLoading(false);
     }
-  }, [isAuthenticated, isPlatformAdmin, currentUser?.tenantId]);
+  }, [isAuthenticated, isPlatformAdmin, currentUser?.tenantId, loadData]);
 
   const refreshData = () => loadData();
 

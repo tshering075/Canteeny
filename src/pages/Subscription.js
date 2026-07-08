@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Alert,
   Box,
@@ -69,18 +69,20 @@ function Subscription() {
   const [invoicePayment, setInvoicePayment] = useState(null);
   const fileInputRef = useRef(null);
 
-  const load = async () => {
+  const tenantId = tenant?.id;
+
+  const load = useCallback(async () => {
     const [s, p] = await Promise.all([
       getPlatformSettings(),
-      tenant ? getPaymentsForTenant(tenant.id) : Promise.resolve([]),
+      tenantId ? getPaymentsForTenant(tenantId) : Promise.resolve([]),
     ]);
     setSettings(s);
     setPayments(p);
-  };
+  }, [tenantId]);
 
   useEffect(() => {
     load();
-  }, [tenant?.id]);
+  }, [load]);
 
   const handleSubmit = async () => {
     if (!tenant) return;

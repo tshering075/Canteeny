@@ -85,6 +85,10 @@ ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_submissions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "anon_all_tenants" ON tenants;
+DROP POLICY IF EXISTS "anon_all_platform_settings" ON platform_settings;
+DROP POLICY IF EXISTS "anon_all_payment_submissions" ON payment_submissions;
+
 CREATE POLICY "anon_all_tenants" ON tenants FOR ALL TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "anon_all_platform_settings" ON platform_settings FOR ALL TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "anon_all_payment_submissions" ON payment_submissions FOR ALL TO anon USING (true) WITH CHECK (true);

@@ -32,6 +32,15 @@ BEGIN
     ) THEN
       EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY;', tbl);
 
+      -- Drop legacy single-policy names from migration 004.
+      IF tbl = 'tenants' THEN
+        EXECUTE 'DROP POLICY IF EXISTS "anon_all_tenants" ON public.tenants;';
+      ELSIF tbl = 'platform_settings' THEN
+        EXECUTE 'DROP POLICY IF EXISTS "anon_all_platform_settings" ON public.platform_settings;';
+      ELSIF tbl = 'payment_submissions' THEN
+        EXECUTE 'DROP POLICY IF EXISTS "anon_all_payment_submissions" ON public.payment_submissions;';
+      END IF;
+
       -- Drop any prior copies so this migration is idempotent.
       EXECUTE format('DROP POLICY IF EXISTS "anon_select_%1$s" ON public.%1$I;', tbl);
       EXECUTE format('DROP POLICY IF EXISTS "anon_insert_%1$s" ON public.%1$I;', tbl);
