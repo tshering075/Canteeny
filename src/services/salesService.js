@@ -5,6 +5,7 @@ import {
   generateId,
   STORAGE_KEYS,
 } from './storage';
+import { getCurrentTenantId } from './tenantScope';
 
 const toSale = (row) =>
   row
@@ -20,6 +21,7 @@ const toSale = (row) =>
     : null;
 
 function buildSalePayload(data) {
+  const tenantId = getCurrentTenantId();
   const items = (data.items || []).map((i) => ({
     mealId: i.mealId,
     mealName: i.mealName,
@@ -34,6 +36,7 @@ function buildSalePayload(data) {
     items,
     total_amount: totalAmount,
     date: data.date || new Date().toISOString().split('T')[0],
+    tenant_id: tenantId || null,
   };
 }
 
@@ -44,18 +47,32 @@ function cacheRecentSales(list) {
 }
 
 async function fetchSalesFromSupabase() {
+  const tenantId = getCurrentTenantId();
   const pageSize = 1000;
   let from = 0;
   const rows = [];
   let hasMore = true;
+  let useTenantFilter = !!tenantId;
 
   while (hasMore) {
-    const { data, error } = await supabase
+    let query = supabase
       .from('sales')
       .select('*')
       .order('created_at', { ascending: false })
       .range(from, from + pageSize - 1);
+    if (useTenantFilter) {
+      query = query.eq('tenant_id', tenantId);
+    }
 
+    const { data, error } = await query;
+
+    if (error && useTenantFilter) {
+      useTenantFilter = false;
+      from = 0;
+      rows.length = 0;
+      hasMore = true;
+      continue;
+    }
     if (error) throw new Error(error.message);
     if (!data || data.length === 0) {
       hasMore = false;
@@ -70,6 +87,7 @@ async function fetchSalesFromSupabase() {
 }
 
 export async function getSales() {
+  const tenantId = getCurrentTenantId();
   if (supabase) {
     try {
       const list = await fetchSalesFromSupabase();
@@ -77,21 +95,31 @@ export async function getSales() {
       return list;
     } catch (err) {
       console.warn('Failed to load sales from Supabase:', err);
-      return getFromStorage(STORAGE_KEYS.SALES, []);
+      const all = getFromStorage(STORAGE_KEYS.SALES, []);
+      return tenantId ? all.filter((s) => !s.tenantId || s.tenantId === tenantId) : all;
     }
   }
-  return getFromStorage(STORAGE_KEYS.SALES, []);
+  const all = getFromStorage(STORAGE_KEYS.SALES, []);
+  return tenantId ? all.filter((s) => !s.tenantId || s.tenantId === tenantId) : all;
 }
 
 export async function addSale(data) {
   const payload = buildSalePayload(data);
 
   if (supabase) {
-    const { data: row, error } = await supabase
+    let { data: row, error } = await supabase
       .from('sales')
       .insert(payload)
       .select()
       .single();
+    if (error && payload.tenant_id) {
+      const { tenant_id, ...legacyPayload } = payload;
+      ({ data: row, error } = await supabase
+        .from('sales')
+        .insert(legacyPayload)
+        .select()
+        .single());
+    }
     if (error) throw new Error(error.message);
     return toSale(row);
   }
@@ -104,6 +132,7 @@ export async function addSale(data) {
     items: payload.items,
     totalAmount: payload.total_amount,
     date: payload.date,
+    tenantId: payload.tenant_id,
     createdAt: new Date().toISOString(),
   };
   sales.push(sale);

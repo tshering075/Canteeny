@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { getFromStorage, setInStorage, generateId, STORAGE_KEYS } from './storage';
+import { getCurrentTenantId } from './tenantScope';
 
 const toCustomer = (row) =>
   row
@@ -14,32 +15,57 @@ const toCustomer = (row) =>
     : null;
 
 export async function getCustomers() {
+  const tenantId = getCurrentTenantId();
   if (supabase) {
-    const { data, error } = await supabase.from('customers').select('*').order('name');
+    let query = supabase.from('customers').select('*').order('name');
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { data, error } = await query;
     if (!error && data) {
       const list = data.map(toCustomer);
       setInStorage(STORAGE_KEYS.CUSTOMERS, list);
       return list;
     }
+    if (tenantId && error) {
+      const { data: allData, error: allError } = await supabase
+        .from('customers')
+        .select('*')
+        .order('name');
+      if (!allError && allData) {
+        const list = allData.map(toCustomer);
+        setInStorage(STORAGE_KEYS.CUSTOMERS, list);
+        return list;
+      }
+    }
   }
-  return getFromStorage(STORAGE_KEYS.CUSTOMERS, []);
+  const all = getFromStorage(STORAGE_KEYS.CUSTOMERS, []);
+  return tenantId ? all.filter((c) => !c.tenantId || c.tenantId === tenantId) : all;
 }
 
 export async function addCustomer(data) {
+  const tenantId = getCurrentTenantId();
   const payload = {
     name: data.name?.trim() || '',
     department: data.department?.trim() || '',
     phone: data.phone?.trim() || '',
     employee_type: data.employeeType || 'regular',
+    tenant_id: tenantId || null,
   };
   let result = null;
 
   if (supabase) {
-    const { data: row, error } = await supabase
+    let { data: row, error } = await supabase
       .from('customers')
       .insert(payload)
       .select()
       .single();
+    if (error && payload.tenant_id) {
+      const { tenant_id, ...legacyPayload } = payload;
+      ({ data: row, error } = await supabase
+        .from('customers')
+        .insert(legacyPayload)
+        .select()
+        .single());
+    }
     if (!error) result = toCustomer(row);
   }
 
@@ -50,6 +76,7 @@ export async function addCustomer(data) {
     department: payload.department,
     phone: payload.phone,
     employeeType: payload.employee_type,
+    tenantId: tenantId || null,
     createdAt: result?.createdAt || new Date().toISOString(),
   };
   customers.push(customer);

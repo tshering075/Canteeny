@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { getFromStorage, setInStorage, generateId, STORAGE_KEYS } from './storage';
+import { getCurrentTenantId } from './tenantScope';
 
 const toMeal = (row) =>
   row
@@ -15,32 +16,57 @@ const toMeal = (row) =>
 
 
 export async function getMeals() {
+  const tenantId = getCurrentTenantId();
   if (supabase) {
-    const { data, error } = await supabase.from('meals').select('*').order('name');
+    let query = supabase.from('meals').select('*').order('name');
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+    const { data, error } = await query;
     if (!error && data) {
       const list = data.map(toMeal);
       setInStorage(STORAGE_KEYS.MEALS, list);
       return list;
     }
+    if (tenantId && error) {
+      const { data: allData, error: allError } = await supabase
+        .from('meals')
+        .select('*')
+        .order('name');
+      if (!allError && allData) {
+        const list = allData.map(toMeal);
+        setInStorage(STORAGE_KEYS.MEALS, list);
+        return list;
+      }
+    }
   }
-  return getFromStorage(STORAGE_KEYS.MEALS, []);
+  const all = getFromStorage(STORAGE_KEYS.MEALS, []);
+  return tenantId ? all.filter((m) => !m.tenantId || m.tenantId === tenantId) : all;
 }
 
 export async function addMeal(data) {
+  const tenantId = getCurrentTenantId();
   const payload = {
     name: data.name?.trim() || '',
     category: data.category?.trim() || 'General',
     price: Number(data.price) || 0,
     is_active: data.isActive !== false,
+    tenant_id: tenantId || null,
   };
   let result = null;
 
   if (supabase) {
-    const { data: row, error } = await supabase
+    let { data: row, error } = await supabase
       .from('meals')
       .insert(payload)
       .select()
       .single();
+    if (error && payload.tenant_id) {
+      const { tenant_id, ...legacyPayload } = payload;
+      ({ data: row, error } = await supabase
+        .from('meals')
+        .insert(legacyPayload)
+        .select()
+        .single());
+    }
     if (!error) result = toMeal(row);
   }
 
@@ -51,6 +77,7 @@ export async function addMeal(data) {
     category: payload.category,
     price: payload.price,
     isActive: payload.is_active,
+    tenantId: tenantId || null,
     createdAt: result?.createdAt || new Date().toISOString(),
   };
   meals.push(meal);

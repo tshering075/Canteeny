@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { getFromStorage, setInStorage, STORAGE_KEYS, generateId } from './storage';
+import { getCurrentTenantId } from './tenantScope';
 
 const toUser = (row) =>
   row
@@ -9,33 +10,76 @@ const toUser = (row) =>
         password: row.password,
         canRead: row.can_read !== false,
         canWrite: row.can_write === true,
+        tenantId: row.tenant_id || null,
+        isPlatformAdmin: row.is_platform_admin === true,
       }
     : null;
 
 const DEFAULT_USERS = [
-  { id: 'admin-default', userId: 'admin', password: '1234', canRead: true, canWrite: true },
+  {
+    id: 'admin-default',
+    userId: 'admin',
+    password: '1234',
+    canRead: true,
+    canWrite: true,
+    tenantId: 'default-tenant',
+    isPlatformAdmin: false,
+  },
+  {
+    id: 'owner-default',
+    userId: 'owner',
+    password: 'owner123',
+    canRead: true,
+    canWrite: true,
+    tenantId: null,
+    isPlatformAdmin: true,
+  },
 ];
 
-export async function getUsers() {
+export async function getUsers(tenantId) {
+  const scopeId = tenantId ?? getCurrentTenantId();
+
   if (supabase) {
-    const { data, error } = await supabase.from('app_users').select('*').order('user_id');
+    let query = supabase.from('app_users').select('*').order('user_id');
+    if (scopeId) {
+      query = query.eq('tenant_id', scopeId);
+    }
+    const { data, error } = await query;
     if (!error && data) {
       const list = data.map(toUser);
       if (list.length > 0) setInStorage(STORAGE_KEYS.USERS, list);
-      return list;
+      return scopeId ? list.filter((u) => !u.isPlatformAdmin) : list.filter((u) => !u.isPlatformAdmin);
+    }
+    // Fallback if tenant_id column missing (pre-migration)
+    if (scopeId) {
+      const { data: allData, error: allError } = await supabase
+        .from('app_users')
+        .select('*')
+        .order('user_id');
+      if (!allError && allData) {
+        const list = allData.map(toUser).filter((u) => !u.isPlatformAdmin);
+        setInStorage(STORAGE_KEYS.USERS, list);
+        return list;
+      }
     }
   }
+
   let users = getFromStorage(STORAGE_KEYS.USERS, []);
   if (users.length === 0) {
     setInStorage(STORAGE_KEYS.USERS, DEFAULT_USERS);
     users = DEFAULT_USERS;
   }
-  return users;
+  if (scopeId) {
+    const scoped = users.filter((u) => u.tenantId === scopeId && !u.isPlatformAdmin);
+    return scoped.length > 0 ? scoped : users.filter((u) => !u.isPlatformAdmin);
+  }
+  return users.filter((u) => !u.isPlatformAdmin);
 }
 
-export async function createUser({ userId, password, canRead = true, canWrite = false }) {
+export async function createUser({ userId, password, canRead = true, canWrite = false, tenantId }) {
   const uid = userId.trim();
   const pwd = String(password);
+  const scopeId = tenantId ?? getCurrentTenantId();
 
   if (supabase) {
     const { data: existing } = await supabase
@@ -52,6 +96,8 @@ export async function createUser({ userId, password, canRead = true, canWrite = 
         password: pwd,
         can_read: !!canRead,
         can_write: !!canWrite,
+        tenant_id: scopeId || null,
+        is_platform_admin: false,
       })
       .select()
       .single();
@@ -73,6 +119,8 @@ export async function createUser({ userId, password, canRead = true, canWrite = 
     password: pwd,
     canRead: !!canRead,
     canWrite: !!canWrite,
+    tenantId: scopeId || null,
+    isPlatformAdmin: false,
   };
   users.push(newUser);
   setInStorage(STORAGE_KEYS.USERS, users);
@@ -147,13 +195,77 @@ export async function updateUserPermissions(id, { canRead, canWrite }) {
   return users[idx];
 }
 
+export async function getUserByUserId(userId) {
+  const uid = (userId || '').trim();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('app_users')
+      .select('*')
+      .ilike('user_id', uid)
+      .maybeSingle();
+    if (!error && data) {
+      const user = toUser(data);
+      return {
+        id: user.id,
+        userId: user.userId,
+        canRead: user.canRead,
+        canWrite: user.canWrite,
+        tenantId: user.tenantId,
+        isPlatformAdmin: user.isPlatformAdmin,
+      };
+    }
+  }
+  const users = getFromStorage(STORAGE_KEYS.USERS, DEFAULT_USERS);
+  const user = users.find((u) => (u.userId || '').toLowerCase() === uid.toLowerCase());
+  if (!user) return null;
+  return {
+    id: user.id,
+    userId: user.userId,
+    canRead: user.canRead,
+    canWrite: user.canWrite,
+    tenantId: user.tenantId || null,
+    isPlatformAdmin: user.isPlatformAdmin === true,
+  };
+}
+
 export async function validateUser(userId, password) {
-  const users = await getUsers();
+  const uid = (userId || '').trim();
+  const pwd = String(password);
+
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('app_users')
+      .select('*')
+      .ilike('user_id', uid)
+      .maybeSingle();
+    if (!error && data) {
+      if (data.password !== pwd) return null;
+      const user = toUser(data);
+      return {
+        id: user.id,
+        userId: user.userId,
+        canRead: user.canRead,
+        canWrite: user.canWrite,
+        tenantId: user.tenantId,
+        isPlatformAdmin: user.isPlatformAdmin,
+      };
+    }
+  }
+
+  const stored = getFromStorage(STORAGE_KEYS.USERS, []);
+  const users = stored.length > 0 ? stored : DEFAULT_USERS;
   const user = users.find(
     (u) =>
-      (u.userId || '').toLowerCase() === (userId || '').trim().toLowerCase() &&
-      u.password === String(password)
+      (u.userId || '').toLowerCase() === uid.toLowerCase() &&
+      u.password === pwd
   );
   if (!user) return null;
-  return { userId: user.userId, canRead: user.canRead, canWrite: user.canWrite };
+  return {
+    id: user.id,
+    userId: user.userId,
+    canRead: user.canRead,
+    canWrite: user.canWrite,
+    tenantId: user.tenantId || null,
+    isPlatformAdmin: user.isPlatformAdmin === true,
+  };
 }

@@ -6,6 +6,9 @@ const STORAGE_KEYS = {
   USERS: 'canteen_users',
   ACTIVITIES: 'canteen_activities',
   AUTH_SESSION: 'canteen_auth_session',
+  TENANTS: 'canteen_tenants',
+  PAYMENTS: 'canteen_payments',
+  PLATFORM_SETTINGS: 'canteen_platform_settings',
 };
 
 export function getFromStorage(key, defaultValue = []) {

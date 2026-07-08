@@ -4,12 +4,20 @@ import {
   Box,
   Button,
   Checkbox,
+  Chip,
   Dialog,
   DialogContent,
   DialogTitle,
+  Divider,
+  Grid,
   IconButton,
   InputAdornment,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemText,
   Paper,
+  Stack,
   Table,
   TableBody,
   TableCell,
@@ -27,10 +35,34 @@ import PointOfSaleIcon from '@mui/icons-material/PointOfSale';
 import HistoryIcon from '@mui/icons-material/History';
 import CloseIcon from '@mui/icons-material/Close';
 import SearchIcon from '@mui/icons-material/Search';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+import PersonIcon from '@mui/icons-material/Person';
+import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu';
 import { useAppState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as salesService from '../services/salesService';
 import { addActivity } from '../services/activityService';
+
+function SectionHeader({ icon, title, subtitle }) {
+  return (
+    <Box sx={{ mb: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        {icon}
+        <Box>
+          <Typography variant="subtitle1" fontWeight={700}>
+            {title}
+          </Typography>
+          {subtitle && (
+            <Typography variant="caption" color="text.secondary">
+              {subtitle}
+            </Typography>
+          )}
+        </Box>
+      </Box>
+    </Box>
+  );
+}
 
 function Sales() {
   const { customers, meals, sales, refreshData } = useAppState();
@@ -43,9 +75,7 @@ function Sales() {
     try {
       const saved = localStorage.getItem('canteeny_sales_selected_date');
       if (/^\d{4}-\d{2}-\d{2}$/.test(saved || '')) return saved;
-    } catch (_) {
-      // Ignore storage errors and fall back to today.
-    }
+    } catch (_) {}
     return today;
   });
   const [historyDate, setHistoryDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -57,9 +87,7 @@ function Sales() {
   useEffect(() => {
     try {
       localStorage.setItem(saleDateStorageKey, saleDate);
-    } catch (_) {
-      // Ignore storage errors (e.g., private mode restrictions).
-    }
+    } catch (_) {}
   }, [saleDate, saleDateStorageKey]);
 
   const activeMeals = meals.filter((m) => m.isActive !== false);
@@ -74,18 +102,33 @@ function Sales() {
     );
   }, [activeMeals, mealSearch]);
 
+  const mealsByCategory = useMemo(() => {
+    const groups = {};
+    mealOptions.forEach((meal) => {
+      const cat = meal.category || 'General';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(meal);
+    });
+    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+  }, [mealOptions]);
+
   const filteredSales = useMemo(() => {
     const q = historySearch.toLowerCase().trim();
     const list = sales.filter((s) => {
       if (historyDate && s.date !== historyDate) return false;
       if (!q) return true;
-      const customer = (s.customerName || '').toLowerCase();
+      const customerName = (s.customerName || '').toLowerCase();
       const dateStr = (s.date || '').toLowerCase();
       const totalStr = String(s.totalAmount ?? '');
-      return customer.includes(q) || dateStr.includes(q) || totalStr.includes(q);
+      return customerName.includes(q) || dateStr.includes(q) || totalStr.includes(q);
     });
     return [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }, [sales, historyDate, historySearch]);
+
+  const historySummary = useMemo(() => {
+    const total = filteredSales.reduce((sum, s) => sum + (s.totalAmount || 0), 0);
+    return { count: filteredSales.length, total };
+  }, [filteredSales]);
 
   const addToCart = (meal) => {
     const existing = cart.find((c) => c.mealId === meal.id);
@@ -161,10 +204,7 @@ function Sales() {
     }
     const newTotal = newItems.reduce((s, i) => s + (i.subtotal || 0), 0);
     await salesService.updateSale(sale.id, { items: newItems });
-    addActivity(
-      currentUser?.userId || 'Unknown',
-      `Removed item from sale: ${sale.customerName}`
-    );
+    addActivity(currentUser?.userId || 'Unknown', `Removed item from sale: ${sale.customerName}`);
     setSelectedSale((prev) =>
       prev?.id === sale.id ? { ...prev, items: newItems, totalAmount: newTotal } : prev
     );
@@ -246,298 +286,452 @@ function Sales() {
   };
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-        {/* New Sale - Left Panel */}
-        <Paper
-          sx={{
-            p: 3,
-            flex: '1 1 380px',
-            minWidth: 0,
-            alignSelf: 'flex-start',
-            display: 'flex',
-            flexDirection: 'column',
-            maxWidth: 480,
-            maxHeight: 'calc(100vh - 120px)',
-            overflow: 'hidden',
-          }}
+    <Box sx={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
+      <Stack spacing={3}>
+        <Grid
+          container
+          spacing={3}
+          alignItems="stretch"
+          sx={{ width: '100%', mt: -2, ml: -1.5, mr: 0.5 }}
         >
-          <Box sx={{ flex: 1, overflowY: 'auto', minHeight: 0, mr: -1, pr: 1 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-              <PointOfSaleIcon color="primary" />
-              <Typography variant="h6" fontWeight={600}>
-                New Sale
-              </Typography>
-            </Box>
-
-            {/* Sale date - allows adding sales for past dates */}
-            <Box sx={{ mb: 2 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-              Sale date
-            </Typography>
-            <TextField
-              type="date"
-              size="small"
-              fullWidth
-              value={saleDate}
-              onChange={(e) => setSaleDate(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-            />
-          </Box>
-
-          {/* Customer */}
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-              Customer
-            </Typography>
-            <Autocomplete
-              size="small"
-              options={customers}
-              getOptionLabel={(c) => `${c.name} — ${c.department}`}
-              value={customer}
-              onChange={(_, v) => setCustomer(v)}
-              renderInput={(params) => (
-                <TextField {...params} placeholder="Walk-in" />
-              )}
-            />
-          </Box>
-
-          {/* Meals search */}
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-              Add meal
-            </Typography>
-            <Autocomplete
-              size="small"
-              options={mealOptions}
-              getOptionLabel={(m) => `${m.name} — ${m.category || 'General'} · Nu ${Number(m.price).toFixed(2)}`}
-              value={null}
-              onChange={(_, v) => {
-                if (v) addToCart(v);
-                setMealSearch('');
+          {/* ── New Sale ── */}
+          <Grid item xs={12} md={6} sx={{ minWidth: 0 }}>
+            <Paper
+              variant="outlined"
+              elevation={0}
+              sx={{
+                p: 0,
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                borderRadius: 3,
+                border: '1px solid',
+                borderColor: 'divider',
+                overflow: 'hidden',
               }}
-              inputValue={mealSearch}
-              onInputChange={(_, v) => setMealSearch(v)}
-              renderInput={(params) => (
-                <TextField {...params} placeholder="Search meal by name or category..." />
-              )}
-              renderOption={(props, m) => (
-                <li {...props} key={m.id}>
-                  {m.name} — {m.category || 'General'} · Nu {Number(m.price).toFixed(2)}
-                </li>
-              )}
-            />
-          </Box>
+            >
+              <Box sx={{ px: 3, py: 2, bgcolor: 'primary.main', color: 'primary.contrastText' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  <PointOfSaleIcon />
+                  <Typography variant="h6" fontWeight={700}>
+                    New Sale
+                  </Typography>
+                </Box>
+              </Box>
 
-          {/* Cart */}
-          {cart.length > 0 && (
-            <Box sx={{ mt: 2, flex: 1, minHeight: 120 }}>
-              <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
-                Cart ({cart.length} item{cart.length !== 1 ? 's' : ''})
-              </Typography>
-              <TableContainer sx={{ maxHeight: 220, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
-                <Table size="small" stickyHeader>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ fontWeight: 600 }}>Item</TableCell>
-                      <TableCell align="center" sx={{ fontWeight: 600, width: 160 }}>
-                        Qty
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600 }}>Subtotal</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {cart.map((item) => (
-                      <TableRow key={item.mealId}>
-                        <TableCell sx={{ fontWeight: 500 }}>{item.mealName}</TableCell>
-                        <TableCell align="center">
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
-                            <IconButton
-                              size="small"
-                              onClick={() => adjustQuantity(item.mealId, -0.5)}
-                              sx={{ p: 0.25 }}
-                            >
-                              <RemoveIcon fontSize="small" />
-                            </IconButton>
-                            <TextField
-                              type="number"
-                              size="small"
-                              inputProps={{ min: 0.5, step: 0.5 }}
-                              sx={{ width: 72, '& input': { textAlign: 'center' } }}
-                              value={item.quantity}
-                              onChange={(e) =>
-                                updateQuantity(item.mealId, parseFloat(e.target.value) || 1)
-                              }
-                            />
-                            <IconButton
-                              size="small"
-                              onClick={() => adjustQuantity(item.mealId, 0.5)}
-                              sx={{ p: 0.25 }}
-                            >
-                              <AddIcon fontSize="small" />
-                            </IconButton>
-                          </Box>
-                        </TableCell>
-                        <TableCell align="right">Nu {item.subtotal?.toFixed(2)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Box>
-          )}
-          </Box>
+              <Box sx={{ flex: 1, overflowY: 'auto', px: 3, py: 2 }}>
+                <SectionHeader
+                  icon={<CalendarTodayIcon color="primary" fontSize="small" />}
+                  title="Sale Details"
+                  subtitle="Set date and customer"
+                />
+                <Grid container spacing={2} sx={{ mb: 3 }}>
+                  <Grid item xs={12} sm={5}>
+                    <TextField
+                      type="date"
+                      size="small"
+                      fullWidth
+                      label="Sale date"
+                      value={saleDate}
+                      onChange={(e) => setSaleDate(e.target.value)}
+                      InputLabelProps={{ shrink: true }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={7}>
+                    <Autocomplete
+                      size="small"
+                      options={customers}
+                      getOptionLabel={(c) => `${c.name} — ${c.department}`}
+                      value={customer}
+                      onChange={(_, v) => setCustomer(v)}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Customer"
+                          placeholder="Walk-in"
+                          InputProps={{
+                            ...params.InputProps,
+                            startAdornment: (
+                              <>
+                                <InputAdornment position="start">
+                                  <PersonIcon fontSize="small" color="action" />
+                                </InputAdornment>
+                                {params.InputProps.startAdornment}
+                              </>
+                            ),
+                          }}
+                        />
+                      )}
+                    />
+                  </Grid>
+                </Grid>
 
-          {/* Total & Complete - always visible at bottom */}
-          <Box
+                <Divider sx={{ mb: 3 }} />
+
+                <SectionHeader
+                  icon={<RestaurantMenuIcon color="primary" fontSize="small" />}
+                  title="Select Meals"
+                  subtitle="Search or tap a meal to add"
+                />
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="Search meal by name or category..."
+                  value={mealSearch}
+                  onChange={(e) => setMealSearch(e.target.value)}
+                  sx={{ mb: 2 }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchIcon fontSize="small" color="action" />
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+
+                <Box sx={{ maxHeight: { xs: 260, md: 420 }, overflowY: 'auto' }}>
+                  {mealsByCategory.length === 0 ? (
+                    <Typography variant="caption" color="text.secondary" sx={{ py: 1.5, textAlign: 'center', display: 'block' }}>
+                      No active meals found
+                    </Typography>
+                  ) : (
+                    mealsByCategory.map(([category, categoryMeals]) => (
+                      <Box key={category} sx={{ mb: 1 }}>
+                        <Typography
+                          variant="caption"
+                          fontWeight={700}
+                          color="text.secondary"
+                          sx={{ display: 'block', px: 0.5, mb: 0.25, textTransform: 'uppercase', letterSpacing: 0.5 }}
+                        >
+                          {category}
+                        </Typography>
+                        <List dense disablePadding sx={{ bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                          {categoryMeals.map((meal, idx) => {
+                            const inCart = cart.find((c) => c.mealId === meal.id);
+                            return (
+                              <ListItem
+                                key={meal.id}
+                                disablePadding
+                                divider={idx < categoryMeals.length - 1}
+                                secondaryAction={
+                                  inCart ? (
+                                    <Typography variant="caption" fontWeight={700} color="primary.main" sx={{ pr: 1 }}>
+                                      ×{inCart.quantity}
+                                    </Typography>
+                                  ) : (
+                                    <AddIcon sx={{ fontSize: 16, color: 'action.active', mr: 0.5 }} />
+                                  )
+                                }
+                                sx={{
+                                  minHeight: 32,
+                                  bgcolor: inCart ? 'action.hover' : 'transparent',
+                                }}
+                              >
+                                <ListItemButton
+                                  onClick={() => addToCart(meal)}
+                                  sx={{ py: 0.25, px: 1, minHeight: 32 }}
+                                >
+                                  <ListItemText
+                                    disableTypography
+                                    primary={
+                                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, pr: 4 }}>
+                                        <Typography variant="body2" fontWeight={500} noWrap sx={{ fontSize: '0.8125rem' }}>
+                                          {meal.name}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap', fontSize: '0.75rem' }}>
+                                          Nu {Number(meal.price).toFixed(2)}
+                                        </Typography>
+                                      </Box>
+                                    }
+                                  />
+                                </ListItemButton>
+                              </ListItem>
+                            );
+                          })}
+                        </List>
+                      </Box>
+                    ))
+                  )}
+                </Box>
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* ── Cart ── */}
+          <Grid item xs={12} md={6} sx={{ minWidth: 0 }}>
+            <Paper
+              variant="outlined"
+              elevation={0}
+              sx={{
+                p: 0,
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                borderRadius: 3,
+                border: '1px solid',
+                borderColor: 'divider',
+                overflow: 'hidden',
+              }}
+            >
+              <Box sx={{ px: 3, py: 2, borderBottom: 1, borderColor: 'divider' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  <ShoppingCartIcon color="primary" />
+                  <Box>
+                    <Typography variant="h6" fontWeight={700}>
+                      Cart
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {cart.length === 0 ? 'No items yet' : `${cart.length} item(s) selected`}
+                    </Typography>
+                  </Box>
+                </Box>
+              </Box>
+
+              <Box sx={{ flex: 1, overflowY: 'auto', overflowX: 'auto', px: 3, py: 2, minHeight: { xs: 200, md: 320 } }}>
+                {cart.length === 0 ? (
+                  <Paper
+                    variant="outlined"
+                    sx={{ p: 3, textAlign: 'center', borderRadius: 2, borderStyle: 'dashed', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
+                  >
+                    <ShoppingCartIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1, mx: 'auto' }} />
+                    <Typography variant="body2" color="text.secondary">
+                      Add meals from the list
+                    </Typography>
+                  </Paper>
+                ) : (
+                  <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2, overflowX: 'auto' }}>
+                    <Table size="small" sx={{ minWidth: 280 }}>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 600 }}>Item</TableCell>
+                          <TableCell align="center" sx={{ fontWeight: 600, width: 120 }}>
+                            Qty
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>Subtotal</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {cart.map((item) => (
+                          <TableRow key={item.mealId}>
+                            <TableCell sx={{ fontWeight: 500 }}>{item.mealName}</TableCell>
+                            <TableCell align="center">
+                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                                <IconButton size="small" onClick={() => adjustQuantity(item.mealId, -0.5)}>
+                                  <RemoveIcon fontSize="small" />
+                                </IconButton>
+                                <TextField
+                                  type="number"
+                                  size="small"
+                                  inputProps={{ min: 0.5, step: 0.5 }}
+                                  sx={{ width: 56, '& input': { textAlign: 'center', py: 0.5 } }}
+                                  value={item.quantity}
+                                  onChange={(e) =>
+                                    updateQuantity(item.mealId, parseFloat(e.target.value) || 1)
+                                  }
+                                />
+                                <IconButton size="small" onClick={() => adjustQuantity(item.mealId, 0.5)}>
+                                  <AddIcon fontSize="small" />
+                                </IconButton>
+                              </Box>
+                            </TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 600 }}>
+                              Nu {item.subtotal?.toFixed(2)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </Box>
+
+              <Box
+                sx={{
+                  px: 3,
+                  py: 2,
+                  borderTop: 1,
+                  borderColor: 'divider',
+                  bgcolor: 'action.hover',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 1.5,
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Typography variant="caption" color="text.secondary">
+                    Order total
+                  </Typography>
+                  <Typography variant="h5" fontWeight={800} color="primary.main">
+                    Nu {totalAmount.toFixed(2)}
+                  </Typography>
+                </Box>
+                <Button
+                  variant="contained"
+                  size="large"
+                  fullWidth
+                  startIcon={<PointOfSaleIcon />}
+                  onClick={handleCompleteSale}
+                  disabled={cart.length === 0}
+                  sx={{ py: 1.25 }}
+                >
+                  Complete Sale
+                </Button>
+              </Box>
+            </Paper>
+          </Grid>
+        </Grid>
+
+        {/* ── Sales History ── */}
+        <Box>
+          <Paper
             sx={{
-              flexShrink: 0,
-              mt: 2,
-              pt: 2,
-              borderTop: 1,
-              borderColor: 'divider',
+              p: 0,
               display: 'flex',
-              flexWrap: 'wrap',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: 2,
-              rowGap: 1.5,
-              bgcolor: 'background.paper',
+              flexDirection: 'column',
+              borderRadius: 3,
+              overflow: 'hidden',
             }}
           >
-            <Typography variant="h6" fontWeight={700} sx={{ m: 0, lineHeight: 1.4 }}>
-              Total: Nu {totalAmount.toFixed(2)}
-            </Typography>
-            <Button
-              variant="contained"
-              size="large"
-              startIcon={<AddIcon />}
-              onClick={handleCompleteSale}
-              disabled={cart.length === 0}
-              sx={{ minWidth: 160, flexShrink: 0 }}
-            >
-              Complete Sale
-            </Button>
-          </Box>
-        </Paper>
+            <Box sx={{ px: 3, py: 2, borderBottom: 1, borderColor: 'divider' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
+                <HistoryIcon color="primary" />
+                <Typography variant="h6" fontWeight={700}>
+                  Sales History
+                </Typography>
+              </Box>
 
-        {/* Sales History - Right Panel */}
-        <Paper
-          sx={{
-            p: 3,
-            flex: '2 1 420px',
-            minWidth: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            minHeight: 400,
-          }}
-        >
-          <Box sx={{ mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-              <HistoryIcon color="primary" />
-              <Typography variant="h6" fontWeight={600}>
-                Sales History
-              </Typography>
+              <Grid container spacing={2} alignItems="center">
+                <Grid item xs={12} sm={4} md={3}>
+                  <TextField
+                    type="date"
+                    size="small"
+                    fullWidth
+                    label="Filter by date"
+                    value={historyDate}
+                    onChange={(e) => setHistoryDate(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={8} md={5}>
+                  <TextField
+                    size="small"
+                    fullWidth
+                    placeholder="Search customer or amount..."
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchIcon fontSize="small" color="action" />
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Chip
+                      label={`${historySummary.count} sale${historySummary.count !== 1 ? 's' : ''}`}
+                      color="primary"
+                      variant="outlined"
+                      size="small"
+                    />
+                    <Chip
+                      label={`Nu ${historySummary.total.toFixed(2)}`}
+                      color="success"
+                      variant="outlined"
+                      size="small"
+                    />
+                  </Stack>
+                </Grid>
+              </Grid>
             </Box>
-            <Box
-              sx={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 2,
-                alignItems: 'center',
-              }}
-            >
-              <TextField
-                type="date"
-                size="small"
-                label="Date"
-                value={historyDate}
-                onChange={(e) => setHistoryDate(e.target.value)}
-                InputLabelProps={{ shrink: true }}
-                sx={{ minWidth: 160 }}
-              />
-              <TextField
-                size="small"
-                placeholder="Search customer, date, or amount..."
-                value={historySearch}
-                onChange={(e) => setHistorySearch(e.target.value)}
-                sx={{ flex: '1 1 200px', minWidth: 180 }}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon fontSize="small" color="action" />
-                    </InputAdornment>
-                  ),
-                }}
-              />
-            </Box>
-          </Box>
 
-          <TableContainer sx={{ flex: 1, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
-            <Table size="small" stickyHeader>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
-                  <TableCell sx={{ fontWeight: 600 }}>Customer</TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>Total</TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600, width: 60 }}></TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredSales.length === 0 ? (
+            <TableContainer sx={{ flex: 1 }}>
+              <Table size="small" stickyHeader>
+                <TableHead>
                   <TableRow>
-                    <TableCell colSpan={4} align="center" sx={{ py: 8 }}>
-                      <Typography color="text.secondary">
-                        {historySearch.trim()
-                          ? 'No sales match your search'
-                          : 'No sales on this date'}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                        Complete a sale to see it here
-                      </Typography>
+                    <TableCell sx={{ fontWeight: 700, bgcolor: 'background.paper' }}>Time</TableCell>
+                    <TableCell sx={{ fontWeight: 700, bgcolor: 'background.paper' }}>Customer</TableCell>
+                    <TableCell sx={{ fontWeight: 700, bgcolor: 'background.paper' }} align="center">
+                      Items
                     </TableCell>
+                    <TableCell sx={{ fontWeight: 700, bgcolor: 'background.paper' }} align="right">
+                      Total
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 700, bgcolor: 'background.paper', width: 56 }} />
                   </TableRow>
-                ) : (
-                  filteredSales.map((sale) => (
-                    <TableRow key={sale.id} hover>
-                      <TableCell>{sale.date}</TableCell>
-                      <TableCell
-                        sx={{
-                          cursor: 'pointer',
-                          color: 'primary.main',
-                          textDecoration: 'underline',
-                          '&:hover': { color: 'primary.dark' },
-                        }}
-                        onClick={() => {
-                          setSelectedSale(sale);
-                          setSelectedItemIndices(new Set());
-                        }}
-                      >
-                        {sale.customerName}
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 500 }}>
-                        Nu {(sale.totalAmount || 0).toFixed(2)}
-                      </TableCell>
-                      <TableCell align="right">
-                        <IconButton
-                          size="small"
-                          onClick={() =>
-                            handleDeleteSale(sale.id, sale.customerName, sale.totalAmount)
-                          }
-                          color="error"
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
+                </TableHead>
+                <TableBody>
+                  {filteredSales.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} align="center" sx={{ py: 10 }}>
+                        <HistoryIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+                        <Typography color="text.secondary">
+                          {historySearch.trim() ? 'No sales match your search' : 'No sales on this date'}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                          Complete a sale to see it here
+                        </Typography>
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  ) : (
+                    filteredSales.map((sale) => (
+                      <TableRow key={sale.id} hover>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          {sale.createdAt
+                            ? new Date(sale.createdAt).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : '—'}
+                        </TableCell>
+                        <TableCell
+                          sx={{
+                            cursor: 'pointer',
+                            color: 'primary.main',
+                            fontWeight: 500,
+                            '&:hover': { textDecoration: 'underline' },
+                          }}
+                          onClick={() => {
+                            setSelectedSale(sale);
+                            setSelectedItemIndices(new Set());
+                          }}
+                        >
+                          {sale.customerName}
+                        </TableCell>
+                        <TableCell align="center">
+                          <Chip
+                            label={(sale.items || []).length}
+                            size="small"
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700 }}>
+                          Nu {(sale.totalAmount || 0).toFixed(2)}
+                        </TableCell>
+                        <TableCell align="right">
+                          <IconButton
+                            size="small"
+                            onClick={() =>
+                              handleDeleteSale(sale.id, sale.customerName, sale.totalAmount)
+                            }
+                            color="error"
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </TableContainer>
-        </Paper>
-      </Box>
+          </Paper>
+        </Box>
+      </Stack>
 
+      {/* Order detail dialog */}
       <Dialog
         open={!!selectedSale}
         onClose={() => {
@@ -546,12 +740,25 @@ function Sales() {
         }}
         maxWidth="md"
         fullWidth
-        fullScreen
       >
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 1, flexWrap: 'wrap', gap: 1 }}>
-          <span>
-            Order — {selectedSale?.customerName} · {selectedSale?.date}
-          </span>
+        <DialogTitle
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 1,
+            borderBottom: 1,
+            borderColor: 'divider',
+          }}
+        >
+          <Box>
+            <Typography variant="h6" fontWeight={700}>
+              Order Details
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {selectedSale?.customerName} · {selectedSale?.date}
+            </Typography>
+          </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             {selectedItemIndices.size > 0 && (
               <Button
@@ -561,7 +768,7 @@ function Sales() {
                 startIcon={<DeleteSweepIcon />}
                 onClick={handleRemoveMultipleItemsFromSale}
               >
-                Delete selected ({selectedItemIndices.size})
+                Delete ({selectedItemIndices.size})
               </Button>
             )}
             <IconButton
@@ -570,18 +777,14 @@ function Sales() {
                 setSelectedSale(null);
                 setSelectedItemIndices(new Set());
               }}
-              aria-label="Close"
             >
               <CloseIcon />
             </IconButton>
           </Box>
         </DialogTitle>
-        <DialogContent>
+        <DialogContent sx={{ pt: 2 }}>
           {selectedSale && (
-            <Box>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Select items to delete multiple at once, or click the trash icon to remove a single item.
-              </Typography>
+            <>
               <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
                 <Table size="small">
                   <TableHead>
@@ -620,14 +823,11 @@ function Sales() {
                             <Checkbox
                               checked={selectedItemIndices.has(idx)}
                               onChange={() => toggleItemSelection(idx)}
-                              onClick={(e) => e.stopPropagation()}
                             />
                           </TableCell>
                           <TableCell>{item.mealName}</TableCell>
                           <TableCell align="center">{item.quantity}</TableCell>
-                          <TableCell align="right">
-                            Nu {(item.unitPrice || 0).toFixed(2)}
-                          </TableCell>
+                          <TableCell align="right">Nu {(item.unitPrice || 0).toFixed(2)}</TableCell>
                           <TableCell align="right">
                             Nu {(item.subtotal ?? (item.quantity * item.unitPrice || 0)).toFixed(2)}
                           </TableCell>
@@ -636,7 +836,6 @@ function Sales() {
                               size="small"
                               onClick={() => handleRemoveItemFromSale(selectedSale, idx)}
                               color="error"
-                              title="Remove this item (customer cancelled)"
                             >
                               <DeleteIcon fontSize="small" />
                             </IconButton>
@@ -647,10 +846,25 @@ function Sales() {
                   </TableBody>
                 </Table>
               </TableContainer>
-              <Typography variant="h6" fontWeight={700} sx={{ mt: 2 }}>
-                Total: Nu {(selectedSale.totalAmount || 0).toFixed(2)}
-              </Typography>
-            </Box>
+              <Box
+                sx={{
+                  mt: 2,
+                  p: 2,
+                  borderRadius: 2,
+                  bgcolor: 'action.hover',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <Typography variant="body2" color="text.secondary">
+                  Order total
+                </Typography>
+                <Typography variant="h6" fontWeight={800} color="primary.main">
+                  Nu {(selectedSale.totalAmount || 0).toFixed(2)}
+                </Typography>
+              </Box>
+            </>
           )}
         </DialogContent>
       </Dialog>

@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import * as userService from '../services/userService';
+import * as tenantService from '../services/tenantService';
 import { addActivity } from '../services/activityService';
 import { STORAGE_KEYS } from '../services/storage';
+import { setCurrentTenantId } from '../services/tenantScope';
+import { isSubscriptionActive } from '../services/subscriptionService';
 
 const AuthContext = createContext(null);
 
-// Use sessionStorage so session ends when user closes tab/PWA
 function getSession() {
   try {
     const s = sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION);
@@ -29,53 +31,102 @@ function setSession(user) {
 export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+  const [tenant, setTenant] = useState(null);
   const [sessionChecked, setSessionChecked] = useState(false);
 
-  useEffect(() => {
-    const stored = getSession();
-    if (stored) {
-      setCurrentUser(stored);
-      setIsAuthenticated(true);
+  const loadTenant = useCallback(async (tenantId) => {
+    if (!tenantId) {
+      setTenant(null);
+      return null;
     }
-    setSessionChecked(true);
+    await tenantService.checkAndExpireTenants();
+    const t = await tenantService.getTenantById(tenantId);
+    setTenant(t);
+    return t;
   }, []);
 
-  const login = useCallback(async (userId, password) => {
-    const user = await userService.validateUser(userId, password);
-    if (user) {
+  const refreshTenant = useCallback(async () => {
+    if (!currentUser?.tenantId) return null;
+    return loadTenant(currentUser.tenantId);
+  }, [currentUser?.tenantId, loadTenant]);
+
+  useEffect(() => {
+    const init = async () => {
+      const stored = getSession();
+      if (stored?.userId) {
+        const fresh = await userService.getUserByUserId(stored.userId);
+        const user = fresh || stored;
+        setCurrentUser(user);
+        setIsAuthenticated(true);
+        setSession(user);
+        if (user.isPlatformAdmin) {
+          setCurrentTenantId(null);
+        } else {
+          setCurrentTenantId(user.tenantId);
+          await loadTenant(user.tenantId);
+        }
+      }
+      setSessionChecked(true);
+    };
+    init();
+  }, [loadTenant]);
+
+  const login = useCallback(
+    async (userId, password) => {
+      const user = await userService.validateUser(userId, password);
+      if (!user) return false;
+
       setCurrentUser(user);
       setIsAuthenticated(true);
       setSession(user);
+
+      if (user.isPlatformAdmin) {
+        setCurrentTenantId(null);
+        setTenant(null);
+      } else {
+        setCurrentTenantId(user.tenantId);
+        await loadTenant(user.tenantId);
+      }
+
       addActivity(user.userId, 'Logged in');
       return true;
-    }
-    return false;
-  }, []);
+    },
+    [loadTenant]
+  );
 
   const logout = useCallback(() => {
     const who = currentUser?.userId || 'Unknown';
     setCurrentUser(null);
+    setTenant(null);
     setIsAuthenticated(false);
+    setCurrentTenantId(null);
     setSession(null);
     addActivity(who, 'Logged out');
   }, [currentUser?.userId]);
 
-  const getUsers = useCallback(() => userService.getUsers(), []);
-  const createUser = useCallback((data) => userService.createUser(data), []);
+  const getUsers = useCallback(() => userService.getUsers(currentUser?.tenantId), [currentUser?.tenantId]);
+  const createUser = useCallback((data) => userService.createUser({ ...data, tenantId: currentUser?.tenantId }), [currentUser?.tenantId]);
   const deleteUser = useCallback((id) => userService.deleteUser(id), []);
   const updateUserPermissions = useCallback((id, perms) => userService.updateUserPermissions(id, perms), []);
   const updatePassword = useCallback((id, newPassword) => userService.updatePassword(id, newPassword), []);
 
-  // Any user with write permission can manage users (not just admin)
   const canManageUsers = !!currentUser?.canWrite;
   const isAdmin = currentUser?.userId?.toLowerCase() === 'admin';
+  const isPlatformAdmin = !!currentUser?.isPlatformAdmin;
+  // Legacy users (pre-migration, no tenant) keep full access until migration runs
+  const isLegacyUser = !!currentUser && !isPlatformAdmin && !currentUser.tenantId;
+  const hasActiveAccess = isPlatformAdmin || isLegacyUser || isSubscriptionActive(tenant);
 
   const value = {
     isAuthenticated,
     currentUser,
+    tenant,
     sessionChecked,
     canManageUsers,
     isAdmin,
+    isPlatformAdmin,
+    hasActiveAccess,
+    refreshTenant,
     updatePassword,
     login,
     logout,

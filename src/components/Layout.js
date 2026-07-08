@@ -28,11 +28,14 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import LogoutIcon from '@mui/icons-material/Logout';
 import ManageAccountsIcon from '@mui/icons-material/ManageAccounts';
 import HistoryIcon from '@mui/icons-material/History';
+import PaymentIcon from '@mui/icons-material/Payment';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
+import SubscriptionBanner from './SubscriptionBanner';
+import { formatExpiryDateTime } from '../services/subscriptionService';
 
 const drawerWidth = 260;
-const navItems = [
+const baseNavItems = [
   { path: '/', label: 'Dashboard', icon: <DashboardIcon /> },
   { path: '/sales', label: 'Sales', icon: <PointOfSaleIcon /> },
   { path: '/customers', label: 'Customers', icon: <PeopleIcon /> },
@@ -40,15 +43,20 @@ const navItems = [
   { path: '/reports', label: 'Reports', icon: <AssessmentIcon />},
   { path: '/users', label: 'Users & Permissions', icon: <ManageAccountsIcon /> },
   { path: '/activity', label: 'Activity', icon: <HistoryIcon /> },
+  { path: '/subscription', label: 'Subscription', icon: <PaymentIcon /> },
 ];
 
-function Layout({ onLogout }) {
+function Layout({ onLogout, hasActiveAccess = true }) {
   const { loading, error } = useAppState();
-  const { currentUser } = useAuth();
+  const { currentUser, tenant } = useAuth();
   const { mode, toggleMode } = useThemeMode();
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+
+  const navItems = hasActiveAccess
+    ? baseNavItems
+    : baseNavItems.filter((item) => item.path === '/subscription');
 
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
 
@@ -117,6 +125,12 @@ function Layout({ onLogout }) {
             sx={{ px: 2, py: 0.5, display: 'block' }}
           >
             Signed in as {currentUser.userId}
+            {tenant?.planExpiresAt && (
+              <>
+                <br />
+                Plan expires: {formatExpiryDateTime(tenant.planExpiresAt)}
+              </>
+            )}
           </Typography>
         )}
         {onLogout && (
@@ -173,8 +187,9 @@ function Layout({ onLogout }) {
             variant="contained"
             size="small"
             startIcon={<PointOfSaleIcon />}
-            onClick={() => navigate('/sales')}
+            onClick={() => navigate(hasActiveAccess ? '/sales' : '/subscription')}
             sx={{ mr: 1 }}
+            disabled={!hasActiveAccess}
           >
             New Sale
           </Button>
@@ -183,6 +198,28 @@ function Layout({ onLogout }) {
           </IconButton>
         </Toolbar>
       </AppBar>
+      <Box
+        sx={{
+          display: { xs: 'none', sm: 'flex' },
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: drawerWidth,
+          height: 64,
+          alignItems: 'center',
+          px: 2.5,
+          borderRight: '1px solid',
+          borderColor: 'divider',
+          borderBottom: '1px solid',
+          bgcolor: 'background.paper',
+          zIndex: (theme) => theme.zIndex.drawer + 2,
+        }}
+      >
+        <RestaurantIcon color="primary" sx={{ mr: 1.25 }} />
+        <Typography variant="subtitle1" fontWeight={700} noWrap title={tenant?.name || 'Canteeny'}>
+          {tenant?.name || 'Canteeny'}
+        </Typography>
+      </Box>
       <Box component="nav" sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}>
         <Drawer
           variant="temporary"
@@ -254,7 +291,12 @@ function Layout({ onLogout }) {
             {error}
           </Box>
         )}
-        {!loading && <Outlet />}
+        {!loading && (
+          <>
+            <SubscriptionBanner />
+            <Outlet />
+          </>
+        )}
         <Typography
           variant="caption"
           sx={{

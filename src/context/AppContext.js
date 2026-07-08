@@ -2,10 +2,12 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as customerService from '../services/customerService';
 import * as mealService from '../services/mealService';
 import * as salesService from '../services/salesService';
+import { useAuth } from './AuthContext';
 
 const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
+  const { isAuthenticated, isPlatformAdmin, currentUser } = useAuth();
   const [customers, setCustomers] = useState([]);
   const [meals, setMeals] = useState([]);
   const [sales, setSales] = useState([]);
@@ -13,6 +15,11 @@ export function AppProvider({ children }) {
   const [error, setError] = useState(null);
 
   const loadData = async () => {
+    if (!isAuthenticated || isPlatformAdmin) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
@@ -47,8 +54,12 @@ export function AppProvider({ children }) {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (isAuthenticated && !isPlatformAdmin && currentUser?.tenantId) {
+      loadData();
+    } else {
+      setLoading(false);
+    }
+  }, [isAuthenticated, isPlatformAdmin, currentUser?.tenantId]);
 
   const refreshData = () => loadData();
 
