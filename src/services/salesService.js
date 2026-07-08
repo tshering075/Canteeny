@@ -16,9 +16,15 @@ const toSale = (row) =>
         items: row.items || [],
         totalAmount: Number(row.total_amount) || 0,
         date: row.date,
+        tenantId: row.tenant_id || null,
         createdAt: row.created_at,
       }
     : null;
+
+function isMissingTenantColumnError(error) {
+  const msg = error?.message || '';
+  return /tenant_id|column.*does not exist/i.test(msg);
+}
 
 function buildSalePayload(data) {
   const tenantId = getCurrentTenantId();
@@ -40,7 +46,8 @@ function buildSalePayload(data) {
   };
 }
 
-const SALES_CACHE_LIMIT = 100;
+// Keep a full offline copy when possible (localStorage ~5MB).
+const SALES_CACHE_LIMIT = 5000;
 
 function cacheRecentSales(list) {
   setInStorage(STORAGE_KEYS.SALES, list.slice(0, SALES_CACHE_LIMIT));
@@ -61,7 +68,9 @@ async function fetchSalesFromSupabase() {
       .order('created_at', { ascending: false })
       .range(from, from + pageSize - 1);
     if (useTenantFilter) {
-      query = query.eq('tenant_id', tenantId);
+      // Include orphan rows (tenant_id IS NULL) saved before tenant was set or
+      // via the legacy insert fallback — otherwise they disappear from reports.
+      query = query.or(`tenant_id.eq.${tenantId},tenant_id.is.null`);
     }
 
     const { data, error } = await query;
@@ -112,7 +121,7 @@ export async function addSale(data) {
       .insert(payload)
       .select()
       .single();
-    if (error && payload.tenant_id) {
+    if (error && payload.tenant_id && isMissingTenantColumnError(error)) {
       const { tenant_id, ...legacyPayload } = payload;
       ({ data: row, error } = await supabase
         .from('sales')
