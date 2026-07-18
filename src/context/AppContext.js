@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import * as customerService from '../services/customerService';
 import * as mealService from '../services/mealService';
 import * as salesService from '../services/salesService';
+import * as couponService from '../services/couponService';
 import { useAuth } from './AuthContext';
 
 const AppContext = createContext(null);
@@ -11,6 +12,7 @@ export function AppProvider({ children }) {
   const [customers, setCustomers] = useState([]);
   const [meals, setMeals] = useState([]);
   const [sales, setSales] = useState([]);
+  const [coupons, setCoupons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -23,17 +25,21 @@ export function AppProvider({ children }) {
     setLoading(true);
     setError(null);
     try {
-      const [cResult, mResult, sResult] = await Promise.allSettled([
+      const [cResult, mResult, sResult, couponResult] = await Promise.allSettled([
         customerService.getCustomers(),
         mealService.getMeals(),
         salesService.getSales(),
+        couponService.getCoupons(),
       ]);
 
       setCustomers(cResult.status === 'fulfilled' ? cResult.value || [] : []);
       setMeals(mResult.status === 'fulfilled' ? mResult.value || [] : []);
       setSales(sResult.status === 'fulfilled' ? sResult.value || [] : []);
+      setCoupons(couponResult.status === 'fulfilled' ? couponResult.value || [] : []);
 
-      const failed = [cResult, mResult, sResult].filter((r) => r.status === 'rejected');
+      const failed = [cResult, mResult, sResult, couponResult].filter(
+        (r) => r.status === 'rejected'
+      );
       if (failed.length > 0) {
         const messages = failed.map((r) => r.reason?.message || 'Failed to load data');
         const isNetwork = messages.some((m) =>
@@ -70,6 +76,8 @@ export function AppProvider({ children }) {
     setMeals,
     sales,
     setSales,
+    coupons,
+    setCoupons,
     loading,
     error,
     refreshData,

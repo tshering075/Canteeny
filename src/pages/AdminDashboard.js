@@ -541,7 +541,13 @@ export function AdminPayments() {
                 <TableCell>{new Date(p.submittedAt).toLocaleString()}</TableCell>
                 <TableCell>{tenantName(p.tenantId)}</TableCell>
                 <TableCell>{PLAN_TYPES[p.planType]?.label}</TableCell>
-                <TableCell>{p.paymentMethod === 'cash' ? 'Cash' : 'Mobile Pay'}</TableCell>
+                <TableCell>
+                  {p.planType === 'trial'
+                    ? 'Free Trial'
+                    : p.paymentMethod === 'cash'
+                      ? 'Cash'
+                      : 'Mobile Pay'}
+                </TableCell>
                 <TableCell>Nu. {p.amount.toLocaleString()}</TableCell>
                 <TableCell>
                   <Chip

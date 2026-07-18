@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { getFromStorage, setInStorage, generateId, STORAGE_KEYS } from './storage';
 import { extendTenantPlan } from './tenantService';
-import { getPlanPrice } from './subscriptionService';
+import { getPlanPrice, isFreeTrialPlan } from './subscriptionService';
 import { getPlatformSettings } from './platformService';
 import { generateInvoiceNumber } from '../utils/invoicePdf';
 
@@ -59,20 +59,27 @@ export async function getPendingPayments() {
 export async function submitPayment({ tenantId, planType, paymentMethod, screenshotData, notes }) {
   const settings = await getPlatformSettings();
   const amount = getPlanPrice(settings, planType);
+  const isTrial = isFreeTrialPlan(planType);
   const submittedAt = new Date().toISOString();
   const invoiceNumber = generateInvoiceNumber(submittedAt);
+  // Free trial activates immediately — no payment review needed.
+  const status = isTrial ? 'approved' : 'pending';
+  const reviewedAt = isTrial ? submittedAt : null;
 
   const payload = {
     tenant_id: tenantId,
     plan_type: planType,
-    payment_method: paymentMethod,
+    payment_method: isTrial ? 'cash' : paymentMethod,
     amount,
-    screenshot_data: screenshotData || '',
-    notes: notes?.trim() || '',
-    status: 'pending',
+    screenshot_data: isTrial ? '' : screenshotData || '',
+    notes: notes?.trim() || (isTrial ? '14-day free trial' : ''),
+    status,
     invoice_number: invoiceNumber,
     submitted_at: submittedAt,
+    reviewed_at: reviewedAt,
   };
+
+  let payment = null;
 
   if (supabase) {
     const { data, error } = await supabase
@@ -81,43 +88,47 @@ export async function submitPayment({ tenantId, planType, paymentMethod, screens
       .select()
       .single();
     if (error) {
-      if (/invoice_number/.test(error.message || '')) {
-        const { invoice_number, submitted_at, ...legacyPayload } = payload;
+      if (/invoice_number|reviewed_at/.test(error.message || '')) {
+        const { invoice_number, submitted_at, reviewed_at, ...legacyPayload } = payload;
         const { data: legacyData, error: legacyError } = await supabase
           .from('payment_submissions')
           .insert(legacyPayload)
           .select()
           .single();
         if (legacyError) throw new Error(legacyError.message || 'Failed to submit payment');
-        const payment = { ...toPayment(legacyData), invoiceNumber };
-        const all = getFromStorage(STORAGE_KEYS.PAYMENTS, []);
-        all.unshift(payment);
-        setInStorage(STORAGE_KEYS.PAYMENTS, all);
-        return payment;
+        payment = {
+          ...toPayment(legacyData),
+          invoiceNumber,
+          status,
+          reviewedAt,
+        };
+      } else {
+        throw new Error(error.message || 'Failed to submit payment');
       }
-      throw new Error(error.message || 'Failed to submit payment');
+    } else {
+      payment = toPayment(data);
     }
-    const payment = toPayment(data);
-    const all = getFromStorage(STORAGE_KEYS.PAYMENTS, []);
-    all.unshift(payment);
-    setInStorage(STORAGE_KEYS.PAYMENTS, all);
-    return payment;
+  } else {
+    payment = {
+      id: generateId(),
+      tenantId,
+      planType,
+      paymentMethod: payload.payment_method,
+      amount,
+      screenshotData: payload.screenshot_data,
+      notes: payload.notes,
+      status,
+      adminNotes: '',
+      invoiceNumber,
+      submittedAt,
+      reviewedAt,
+    };
   }
 
-  const payment = {
-    id: generateId(),
-    tenantId,
-    planType,
-    paymentMethod,
-    amount,
-    screenshotData: screenshotData || '',
-    notes: notes?.trim() || '',
-    status: 'pending',
-    adminNotes: '',
-    invoiceNumber,
-    submittedAt,
-    reviewedAt: null,
-  };
+  if (isTrial) {
+    await extendTenantPlan(tenantId, planType);
+  }
+
   const all = getFromStorage(STORAGE_KEYS.PAYMENTS, []);
   all.unshift(payment);
   setInStorage(STORAGE_KEYS.PAYMENTS, all);

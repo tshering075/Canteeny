@@ -13,6 +13,7 @@ import Dashboard from './pages/Dashboard';
 import Sales from './pages/Sales';
 import Customers from './pages/Customers';
 import Meals from './pages/Meals';
+import Coupons from './pages/Coupons';
 import Reports from './pages/Reports';
 import Users from './pages/Users';
 import Activity from './pages/Activity';
@@ -113,6 +114,14 @@ function AppRoutes() {
           element={
             <TenantRoute>
               <Meals />
+            </TenantRoute>
+          }
+        />
+        <Route
+          path="/coupons"
+          element={
+            <TenantRoute>
+              <Coupons />
             </TenantRoute>
           }
         />

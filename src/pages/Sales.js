@@ -9,15 +9,22 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControl,
+  FormControlLabel,
   Grid,
   IconButton,
   InputAdornment,
+  InputLabel,
   List,
   ListItem,
   ListItemButton,
   ListItemText,
+  MenuItem,
   Paper,
+  Select,
   Stack,
+  Tab,
+  Tabs,
   Table,
   TableBody,
   TableCell,
@@ -39,10 +46,25 @@ import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import PersonIcon from '@mui/icons-material/Person';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu';
+import CreditCardIcon from '@mui/icons-material/CreditCard';
+import LocalOfferIcon from '@mui/icons-material/LocalOffer';
+import NuIcon from '../components/NuIcon';
 import { useAppState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as salesService from '../services/salesService';
 import { addActivity } from '../services/activityService';
+
+function getSaleType(sale) {
+  if (sale?.paymentType === 'cash') return 'cash';
+  if (sale?.paymentType === 'coupon' || sale?.couponId || sale?.couponName) return 'coupon';
+  return 'credit';
+}
+
+function saleTypeLabel(type) {
+  if (type === 'cash') return 'Cash';
+  if (type === 'coupon') return 'Coupon';
+  return 'Credit';
+}
 
 function SectionHeader({ icon, title, subtitle }) {
   return (
@@ -65,11 +87,13 @@ function SectionHeader({ icon, title, subtitle }) {
 }
 
 function Sales() {
-  const { customers, meals, sales, refreshData } = useAppState();
+  const { customers, meals, sales, coupons, refreshData } = useAppState();
   const { currentUser } = useAuth();
   const saleDateStorageKey = 'canteeny_sales_selected_date';
   const [customer, setCustomer] = useState(null);
   const [cart, setCart] = useState([]);
+  const [selectedCouponId, setSelectedCouponId] = useState('');
+  const [applyCoupon, setApplyCoupon] = useState(false);
   const [saleDate, setSaleDate] = useState(() => {
     const today = new Date().toISOString().split('T')[0];
     try {
@@ -80,9 +104,11 @@ function Sales() {
   });
   const [historyDate, setHistoryDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [historySearch, setHistorySearch] = useState('');
+  const [historySaleType, setHistorySaleType] = useState('credit');
   const [mealSearch, setMealSearch] = useState('');
   const [selectedSale, setSelectedSale] = useState(null);
   const [selectedItemIndices, setSelectedItemIndices] = useState(new Set());
+  const [recordingSale, setRecordingSale] = useState(false);
 
   useEffect(() => {
     try {
@@ -112,18 +138,45 @@ function Sales() {
     return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
   }, [mealOptions]);
 
+  const activeCoupons = useMemo(
+    () => (coupons || []).filter((c) => c.isActive !== false),
+    [coupons]
+  );
+
+  const selectedCoupon = useMemo(
+    () => activeCoupons.find((c) => c.id === selectedCouponId) || null,
+    [activeCoupons, selectedCouponId]
+  );
+
+  const couponApplied = applyCoupon && !!selectedCoupon;
+
+  // Clear selection if the chosen coupon was disabled.
+  useEffect(() => {
+    if (selectedCouponId && !selectedCoupon) {
+      setSelectedCouponId('');
+      setApplyCoupon(false);
+    }
+  }, [selectedCouponId, selectedCoupon]);
+
   const filteredSales = useMemo(() => {
     const q = historySearch.toLowerCase().trim();
     const list = sales.filter((s) => {
+      if (getSaleType(s) !== historySaleType) return false;
       if (historyDate && s.date !== historyDate) return false;
       if (!q) return true;
       const customerName = (s.customerName || '').toLowerCase();
+      const couponName = (s.couponName || '').toLowerCase();
       const dateStr = (s.date || '').toLowerCase();
       const totalStr = String(s.totalAmount ?? '');
-      return customerName.includes(q) || dateStr.includes(q) || totalStr.includes(q);
+      return (
+        customerName.includes(q) ||
+        couponName.includes(q) ||
+        dateStr.includes(q) ||
+        totalStr.includes(q)
+      );
     });
     return [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  }, [sales, historyDate, historySearch]);
+  }, [sales, historyDate, historySearch, historySaleType]);
 
   const historySummary = useMemo(() => {
     const total = filteredSales.reduce((sum, s) => sum + (s.totalAmount || 0), 0);
@@ -257,21 +310,45 @@ function Sales() {
     }
   };
 
-  const handleCompleteSale = async () => {
-    if (cart.length === 0) return;
-    await salesService.addSale({
-      customerId: customer?.id || null,
-      customerName: customer ? `${customer.name} (${customer.department})` : 'Walk-in',
-      items: cart,
-      date: saleDate,
-    });
-    addActivity(
-      currentUser?.userId || 'Unknown',
-      `Recorded sale: Nu ${totalAmount.toFixed(2)} to ${customer ? customer.name : 'Walk-in'}`
-    );
-    setCart([]);
-    setCustomer(null);
-    refreshData();
+  const handleRecordSale = async (paymentType) => {
+    if (cart.length === 0 || recordingSale) return;
+    // Coupon-applied credit sales are stored as coupon (not credit).
+    const resolvedType =
+      paymentType === 'cash' ? 'cash' : couponApplied ? 'coupon' : paymentType;
+    if (resolvedType === 'coupon' && !couponApplied) return;
+
+    const typeLabel = saleTypeLabel(resolvedType).toLowerCase();
+    setRecordingSale(true);
+    try {
+      await salesService.addSale({
+        customerId: customer?.id || null,
+        customerName: customer ? `${customer.name} (${customer.department})` : 'Walk-in',
+        items: cart,
+        date: saleDate,
+        paymentType: resolvedType,
+        couponId: couponApplied ? selectedCoupon.id : null,
+        couponName: couponApplied ? selectedCoupon.name : null,
+      });
+      addActivity(
+        currentUser?.userId || 'Unknown',
+        `Recorded ${typeLabel} sale: Nu ${totalAmount.toFixed(2)} to ${customer ? customer.name : 'Walk-in'}${
+          couponApplied ? ` (coupon: ${selectedCoupon.name})` : ''
+        }`
+      );
+      setCart([]);
+      setCustomer(null);
+      setSelectedCouponId('');
+      setApplyCoupon(false);
+      // Match history filters to the sale just recorded.
+      setHistoryDate(saleDate);
+      setHistorySaleType(resolvedType);
+      refreshData();
+    } catch (err) {
+      console.error('Failed to record sale:', err);
+      window.alert(err.message || 'Failed to record sale. Please try again.');
+    } finally {
+      setRecordingSale(false);
+    }
   };
 
   const handleDeleteSale = async (id, customerName, total) => {
@@ -565,17 +642,96 @@ function Sales() {
                     Nu {totalAmount.toFixed(2)}
                   </Typography>
                 </Box>
-                <Button
-                  variant="contained"
-                  size="large"
-                  fullWidth
-                  startIcon={<PointOfSaleIcon />}
-                  onClick={handleCompleteSale}
-                  disabled={cart.length === 0}
-                  sx={{ py: 1.25 }}
-                >
-                  Complete Sale
-                </Button>
+
+                {activeCoupons.length > 0 && (
+                  <>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel id="cart-coupon-label">Coupon</InputLabel>
+                      <Select
+                        labelId="cart-coupon-label"
+                        label="Coupon"
+                        value={selectedCouponId}
+                        onChange={(e) => {
+                          setSelectedCouponId(e.target.value);
+                          if (!e.target.value) setApplyCoupon(false);
+                        }}
+                      >
+                        <MenuItem value="">
+                          <em>None</em>
+                        </MenuItem>
+                        {activeCoupons.map((c) => (
+                          <MenuItem key={c.id} value={c.id}>
+                            {c.name} — qty {c.quantity} @ Nu {Number(c.rate).toFixed(2)}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={applyCoupon}
+                          onChange={(e) => setApplyCoupon(e.target.checked)}
+                          disabled={!selectedCouponId}
+                        />
+                      }
+                      label="Apply coupon for free item(s)"
+                    />
+                    {couponApplied && selectedCoupon && (
+                      <Typography variant="caption" color="text.secondary">
+                        Coupon covers {selectedCoupon.quantity} item(s) at Nu{' '}
+                        {Number(selectedCoupon.rate).toFixed(2)} each (value Nu{' '}
+                        {(Number(selectedCoupon.quantity) * Number(selectedCoupon.rate)).toFixed(2)})
+                      </Typography>
+                    )}
+                  </>
+                )}
+
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                  <Button
+                    variant="contained"
+                    size="large"
+                    fullWidth
+                    color="primary"
+                    startIcon={<CreditCardIcon />}
+                    onClick={() => handleRecordSale('credit')}
+                    disabled={cart.length === 0 || recordingSale}
+                    sx={{ py: 1.25 }}
+                  >
+                    Credit Sale
+                  </Button>
+                  <Button
+                    variant="contained"
+                    size="large"
+                    fullWidth
+                    color="success"
+                    startIcon={<NuIcon />}
+                    onClick={() => handleRecordSale('cash')}
+                    disabled={cart.length === 0 || recordingSale}
+                    sx={{ py: 1.25 }}
+                  >
+                    Cash Sale
+                  </Button>
+                  {activeCoupons.length > 0 && (
+                    <Button
+                      variant="contained"
+                      size="large"
+                      fullWidth
+                      color="warning"
+                      startIcon={<LocalOfferIcon />}
+                      onClick={() => handleRecordSale('coupon')}
+                      disabled={cart.length === 0 || recordingSale || !couponApplied}
+                      sx={{
+                        py: 1.25,
+                        bgcolor: '#F5C518',
+                        color: '#1a1a1a',
+                        '&:hover': { bgcolor: '#E0B000' },
+                        '&.Mui-disabled': { bgcolor: 'action.disabledBackground', color: 'action.disabled' },
+                      }}
+                    >
+                      Coupon Sale
+                    </Button>
+                  )}
+                </Stack>
               </Box>
             </Paper>
           </Grid>
@@ -599,6 +755,34 @@ function Sales() {
                   Sales History
                 </Typography>
               </Box>
+
+              <Tabs
+                value={historySaleType}
+                onChange={(_, value) => setHistorySaleType(value)}
+                sx={{ mb: 2, minHeight: 40, borderBottom: 1, borderColor: 'divider' }}
+              >
+                <Tab
+                  value="credit"
+                  label="Credit Sales"
+                  icon={<CreditCardIcon fontSize="small" />}
+                  iconPosition="start"
+                  sx={{ minHeight: 40, textTransform: 'none', fontWeight: 600 }}
+                />
+                <Tab
+                  value="cash"
+                  label="Cash Sales"
+                  icon={<NuIcon fontSize="small" />}
+                  iconPosition="start"
+                  sx={{ minHeight: 40, textTransform: 'none', fontWeight: 600 }}
+                />
+                <Tab
+                  value="coupon"
+                  label="Coupon Sales"
+                  icon={<LocalOfferIcon fontSize="small" />}
+                  iconPosition="start"
+                  sx={{ minHeight: 40, textTransform: 'none', fontWeight: 600 }}
+                />
+              </Tabs>
 
               <Grid container spacing={2} alignItems="center">
                 <Grid item xs={12} sm={4} md={3}>
@@ -668,10 +852,12 @@ function Sales() {
                       <TableCell colSpan={5} align="center" sx={{ py: 10 }}>
                         <HistoryIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
                         <Typography color="text.secondary">
-                          {historySearch.trim() ? 'No sales match your search' : 'No sales on this date'}
+                          {historySearch.trim()
+                            ? 'No sales match your search'
+                            : `No ${historySaleType} sales on this date`}
                         </Typography>
                         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-                          Complete a sale to see it here
+                          Record a {historySaleType} sale to see it here
                         </Typography>
                       </TableCell>
                     </TableRow>
@@ -699,6 +885,11 @@ function Sales() {
                           }}
                         >
                           {sale.customerName}
+                          {sale.couponName ? (
+                            <Typography variant="caption" display="block" color="text.secondary">
+                              Coupon: {sale.couponName}
+                            </Typography>
+                          ) : null}
                         </TableCell>
                         <TableCell align="center">
                           <Chip
@@ -756,7 +947,9 @@ function Sales() {
               Order Details
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              {selectedSale?.customerName} · {selectedSale?.date}
+              {selectedSale?.customerName} · {selectedSale?.date} ·{' '}
+              {saleTypeLabel(getSaleType(selectedSale))}
+              {selectedSale?.couponName ? ` · Coupon: ${selectedSale.couponName}` : ''}
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>

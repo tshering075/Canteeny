@@ -7,6 +7,26 @@ import {
 } from './storage';
 import { getCurrentTenantId } from './tenantScope';
 
+const normalizePaymentType = (value) => {
+  if (value === 'cash') return 'cash';
+  if (value === 'coupon') return 'coupon';
+  return 'credit';
+};
+
+/** Resolve display/filter type — coupon fields mark coupon sales even if DB stored credit. */
+export function resolveSaleType(saleOrRow) {
+  if (!saleOrRow) return 'credit';
+  const paymentType = normalizePaymentType(
+    saleOrRow.paymentType ?? saleOrRow.payment_type
+  );
+  if (paymentType === 'cash') return 'cash';
+  if (paymentType === 'coupon') return 'coupon';
+  const couponId = saleOrRow.couponId ?? saleOrRow.coupon_id;
+  const couponName = saleOrRow.couponName ?? saleOrRow.coupon_name;
+  if (couponId || couponName) return 'coupon';
+  return 'credit';
+}
+
 const toSale = (row) =>
   row
     ? {
@@ -16,14 +36,38 @@ const toSale = (row) =>
         items: row.items || [],
         totalAmount: Number(row.total_amount) || 0,
         date: row.date,
+        paymentType: resolveSaleType(row),
+        couponId: row.coupon_id ?? row.couponId ?? null,
+        couponName: row.coupon_name ?? row.couponName ?? null,
         tenantId: row.tenant_id || null,
         createdAt: row.created_at,
       }
     : null;
 
-function isMissingTenantColumnError(error) {
+function isMissingColumnError(error, column) {
   const msg = error?.message || '';
-  return /tenant_id|column.*does not exist/i.test(msg);
+  return (
+    new RegExp(`\\b${column}\\b`, 'i').test(msg) &&
+    /does not exist|schema cache|could not find/i.test(msg)
+  );
+}
+
+function isCouponIdError(error) {
+  const msg = error?.message || '';
+  return (
+    isMissingColumnError(error, 'coupon_id') ||
+    isMissingColumnError(error, 'coupon_name') ||
+    (/coupon_id/i.test(msg) &&
+      /foreign key|violates|invalid input syntax|uuid/i.test(msg))
+  );
+}
+
+function isPaymentTypeCheckError(error) {
+  const msg = error?.message || '';
+  return (
+    /payment_type/i.test(msg) &&
+    /check constraint|violates|not currently supported|invalid/i.test(msg)
+  );
 }
 
 function buildSalePayload(data) {
@@ -42,6 +86,9 @@ function buildSalePayload(data) {
     items,
     total_amount: totalAmount,
     date: data.date || new Date().toISOString().split('T')[0],
+    payment_type: normalizePaymentType(data.paymentType),
+    coupon_id: data.couponId || null,
+    coupon_name: data.couponName || null,
     tenant_id: tenantId || null,
   };
 }
@@ -105,32 +152,95 @@ export async function getSales() {
     } catch (err) {
       console.warn('Failed to load sales from Supabase:', err);
       const all = getFromStorage(STORAGE_KEYS.SALES, []);
-      return tenantId ? all.filter((s) => !s.tenantId || s.tenantId === tenantId) : all;
+      const scoped = tenantId ? all.filter((s) => !s.tenantId || s.tenantId === tenantId) : all;
+      return scoped.map((s) => ({
+        ...s,
+        paymentType: resolveSaleType(s),
+        couponId: s.couponId ?? null,
+        couponName: s.couponName ?? null,
+      }));
     }
   }
   const all = getFromStorage(STORAGE_KEYS.SALES, []);
-  return tenantId ? all.filter((s) => !s.tenantId || s.tenantId === tenantId) : all;
+  const scoped = tenantId ? all.filter((s) => !s.tenantId || s.tenantId === tenantId) : all;
+  return scoped.map((s) => ({
+    ...s,
+    paymentType: resolveSaleType(s),
+    couponId: s.couponId ?? null,
+    couponName: s.couponName ?? null,
+  }));
 }
 
 export async function addSale(data) {
   const payload = buildSalePayload(data);
+  const intendedType = normalizePaymentType(data.paymentType);
 
   if (supabase) {
+    let insertPayload = { ...payload };
     let { data: row, error } = await supabase
       .from('sales')
-      .insert(payload)
+      .insert(insertPayload)
       .select()
       .single();
-    if (error && payload.tenant_id && isMissingTenantColumnError(error)) {
-      const { tenant_id, ...legacyPayload } = payload;
+
+    const stripMissing = (col) => {
+      if (!(col in insertPayload)) return false;
+      const { [col]: _removed, ...rest } = insertPayload;
+      insertPayload = rest;
+      return true;
+    };
+
+    const retryInsert = async () => {
       ({ data: row, error } = await supabase
         .from('sales')
-        .insert(legacyPayload)
+        .insert(insertPayload)
         .select()
         .single());
+    };
+
+    // Invalid/missing coupon FK — keep coupon_name so UI can still classify as coupon.
+    if (error && isCouponIdError(error)) {
+      stripMissing('coupon_id');
+      if (isMissingColumnError(error, 'coupon_name')) stripMissing('coupon_name');
+      await retryInsert();
+    }
+
+    // DB check may still only allow credit|cash until migration 012 is applied.
+    // Save as credit + coupon_name; resolveSaleType will treat it as coupon.
+    if (
+      error &&
+      insertPayload.payment_type === 'coupon' &&
+      (isPaymentTypeCheckError(error) || isMissingColumnError(error, 'payment_type'))
+    ) {
+      if (isMissingColumnError(error, 'payment_type')) {
+        stripMissing('payment_type');
+      } else {
+        insertPayload = { ...insertPayload, payment_type: 'credit' };
+      }
+      await retryInsert();
+    }
+
+    if (error && insertPayload.payment_type && isMissingColumnError(error, 'payment_type')) {
+      stripMissing('payment_type');
+      await retryInsert();
+    }
+    if (error && insertPayload.tenant_id && isMissingColumnError(error, 'tenant_id')) {
+      stripMissing('tenant_id');
+      await retryInsert();
     }
     if (error) throw new Error(error.message);
-    return toSale(row);
+
+    const sale = toSale(row);
+    return {
+      ...sale,
+      // Prefer intended coupon type for immediate UI; refresh will use resolveSaleType.
+      paymentType:
+        intendedType === 'coupon' || sale.paymentType === 'coupon'
+          ? 'coupon'
+          : normalizePaymentType(data.paymentType ?? sale.paymentType),
+      couponId: data.couponId ?? sale.couponId,
+      couponName: data.couponName ?? sale.couponName,
+    };
   }
 
   const sales = getFromStorage(STORAGE_KEYS.SALES, []);
@@ -141,6 +251,9 @@ export async function addSale(data) {
     items: payload.items,
     totalAmount: payload.total_amount,
     date: payload.date,
+    paymentType: payload.payment_type,
+    couponId: payload.coupon_id,
+    couponName: payload.coupon_name,
     tenantId: payload.tenant_id,
     createdAt: new Date().toISOString(),
   };
@@ -161,14 +274,40 @@ export async function updateSale(id, data) {
     );
   }
   if (data.date !== undefined) payload.date = data.date;
+  if (data.paymentType !== undefined) {
+    payload.payment_type = normalizePaymentType(data.paymentType);
+  }
 
   if (supabase && Object.keys(payload).length > 0) {
-    const { data: row, error } = await supabase
+    let updatePayload = { ...payload };
+    let { data: row, error } = await supabase
       .from('sales')
-      .update(payload)
+      .update(updatePayload)
       .eq('id', id)
       .select()
       .single();
+    if (error && updatePayload.payment_type && isMissingColumnError(error, 'payment_type')) {
+      const { payment_type, ...rest } = updatePayload;
+      updatePayload = rest;
+      if (Object.keys(updatePayload).length === 0) {
+        // Column missing; keep local semantics via remapped row below.
+        const sales = getFromStorage(STORAGE_KEYS.SALES, []);
+        const cached = sales.find((s) => s.id === id);
+        if (cached) {
+          return {
+            ...cached,
+            paymentType: normalizePaymentType(data.paymentType ?? cached.paymentType),
+          };
+        }
+        throw new Error(error.message);
+      }
+      ({ data: row, error } = await supabase
+        .from('sales')
+        .update(updatePayload)
+        .eq('id', id)
+        .select()
+        .single());
+    }
     if (error) throw new Error(error.message);
     return toSale(row);
   }
@@ -188,6 +327,9 @@ export async function updateSale(id, data) {
     items,
     totalAmount,
     date: data.date ?? sales[index].date,
+    paymentType: normalizePaymentType(
+      data.paymentType ?? sales[index].paymentType
+    ),
   };
   setInStorage(STORAGE_KEYS.SALES, sales);
   return sales[index];

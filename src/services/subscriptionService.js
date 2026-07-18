@@ -1,4 +1,5 @@
 export const PLAN_TYPES = {
+  trial: { label: '14-Day Free Trial', months: 0, days: 14, isFree: true },
   monthly: { label: 'Monthly', months: 1, days: 30 },
   '6month': { label: '6 Months', months: 6, days: 182 },
   annual: { label: 'Annual', months: 12, days: 365 },
@@ -47,7 +48,12 @@ export function formatExpiryDateTime(expiresAt) {
   });
 }
 
+export function isFreeTrialPlan(planType) {
+  return planType === 'trial' || !!PLAN_TYPES[planType]?.isFree;
+}
+
 export function getPlanPrice(settings, planType) {
+  if (isFreeTrialPlan(planType)) return 0;
   if (!settings) return 0;
   if (planType === 'monthly') return Number(settings.monthlyPrice) || 0;
   if (planType === '6month') return Number(settings.sixMonthPrice) || 0;

@@ -19,6 +19,8 @@ import {
   MenuItem,
   Paper,
   Select,
+  Tab,
+  Tabs,
   Table,
   TableBody,
   TableCell,
@@ -36,6 +38,9 @@ import TableChartIcon from '@mui/icons-material/TableChart';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
+import CreditCardIcon from '@mui/icons-material/CreditCard';
+import LocalOfferIcon from '@mui/icons-material/LocalOffer';
+import NuIcon from '../components/NuIcon';
 import {
   getDailyReport,
   getMonthlyReportByCustomerDateRange,
@@ -56,6 +61,7 @@ function Reports() {
   const { sales, customers, refreshData } = useAppState();
   const { canManageUsers, currentUser } = useAuth();
   const [mode, setMode] = useState('daily');
+  const [saleTypeTab, setSaleTypeTab] = useState('credit');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [startDate, setStartDate] = useState(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
@@ -75,10 +81,25 @@ function Reports() {
   const [saveMenuAnchor, setSaveMenuAnchor] = useState(null);
   const [billSaveMenuAnchor, setBillSaveMenuAnchor] = useState(null);
 
-  const daily = mode === 'daily' ? getDailyReport(date, sales) : null;
+  const salesByType = useMemo(() => {
+    return sales.filter((s) => {
+      const type =
+        s.paymentType === 'cash'
+          ? 'cash'
+          : s.paymentType === 'coupon' || s.couponId || s.couponName
+            ? 'coupon'
+            : 'credit';
+      return type === saleTypeTab;
+    });
+  }, [sales, saleTypeTab]);
+
+  const saleTypeLabel =
+    saleTypeTab === 'cash' ? 'Cash' : saleTypeTab === 'coupon' ? 'Coupon' : 'Credit';
+
+  const daily = mode === 'daily' ? getDailyReport(date, salesByType) : null;
   const monthlyReport =
     mode === 'monthly'
-      ? getMonthlyReportByCustomerDateRange(startDate, endDate, sales, customers)
+      ? getMonthlyReportByCustomerDateRange(startDate, endDate, salesByType, customers)
       : null;
   const report = mode === 'daily' ? daily : null;
 
@@ -110,8 +131,8 @@ function Reports() {
 
   const deleteRangeReport = useMemo(() => {
     if (mode !== 'delete') return null;
-    return getReportByDateRange(deleteStartDate, deleteEndDate, sales);
-  }, [mode, deleteStartDate, deleteEndDate, sales]);
+    return getReportByDateRange(deleteStartDate, deleteEndDate, salesByType);
+  }, [mode, deleteStartDate, deleteEndDate, salesByType]);
 
   const deleteFilteredSales = useMemo(() => {
     const list = deleteRangeReport?.sales || [];
@@ -176,7 +197,7 @@ function Reports() {
       await salesService.deleteSales(ids);
       addActivity(
         currentUser?.userId || 'Unknown',
-        `Deleted ${ids.length} sale(s) from ${deleteStartDate} to ${deleteEndDate}`
+        `Deleted ${ids.length} ${saleTypeTab} sale(s) from ${deleteStartDate} to ${deleteEndDate}`
       );
       setSelectedSaleIds(new Set());
       setDeleteConfirmOpen(false);
@@ -190,19 +211,57 @@ function Reports() {
 
   const handleReportSave = (format) => {
     setSaveMenuAnchor(null);
-    if (format === 'pdf') downloadReportPDF(filteredByDepartment, filteredGrandTotal, startDate, endDate);
-    else downloadReportExcel(filteredByDepartment, filteredGrandTotal, startDate, endDate);
+    if (format === 'pdf') {
+      downloadReportPDF(filteredByDepartment, filteredGrandTotal, startDate, endDate, saleTypeLabel);
+    } else {
+      downloadReportExcel(filteredByDepartment, filteredGrandTotal, startDate, endDate, saleTypeLabel);
+    }
   };
 
   const handleBillSave = (format) => {
     if (!detailCustomer) return;
     setBillSaveMenuAnchor(null);
-    if (format === 'pdf') downloadCustomerBillPDF(detailCustomer, startDate, endDate);
-    else downloadCustomerBillExcel(detailCustomer, startDate, endDate);
+    if (format === 'pdf') {
+      downloadCustomerBillPDF(detailCustomer, startDate, endDate, saleTypeLabel);
+    } else {
+      downloadCustomerBillExcel(detailCustomer, startDate, endDate, saleTypeLabel);
+    }
   };
 
   return (
     <Box>
+      <Tabs
+        value={saleTypeTab}
+        onChange={(_, value) => {
+          setSaleTypeTab(value);
+          setSelectedSaleIds(new Set());
+          setDetailCustomer(null);
+        }}
+        sx={{ mb: 2, minHeight: 40, borderBottom: 1, borderColor: 'divider' }}
+      >
+        <Tab
+          value="credit"
+          label="Credit Sales"
+          icon={<CreditCardIcon fontSize="small" />}
+          iconPosition="start"
+          sx={{ minHeight: 40, textTransform: 'none', fontWeight: 600 }}
+        />
+        <Tab
+          value="cash"
+          label="Cash Sales"
+          icon={<NuIcon fontSize="small" />}
+          iconPosition="start"
+          sx={{ minHeight: 40, textTransform: 'none', fontWeight: 600 }}
+        />
+        <Tab
+          value="coupon"
+          label="Coupon Sales"
+          icon={<LocalOfferIcon fontSize="small" />}
+          iconPosition="start"
+          sx={{ minHeight: 40, textTransform: 'none', fontWeight: 600 }}
+        />
+      </Tabs>
+
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
         <FormControl sx={{ minWidth: 140 }}>
           <InputLabel>Report Type</InputLabel>
@@ -272,10 +331,10 @@ function Reports() {
       <Paper sx={{ p: 3, borderRadius: 2 }}>
         <Typography variant="h6" gutterBottom>
           {mode === 'daily'
-            ? `Daily Report - ${date}`
+            ? `${saleTypeLabel} Daily Report - ${date}`
             : mode === 'monthly'
-              ? `Monthly Report - ${startDate} to ${endDate}`
-              : `Delete Sales - ${deleteStartDate} to ${deleteEndDate}`}
+              ? `${saleTypeLabel} Monthly Report - ${startDate} to ${endDate}`
+              : `Delete ${saleTypeLabel} Sales - ${deleteStartDate} to ${deleteEndDate}`}
         </Typography>
 
         {mode === 'delete' && (
@@ -362,7 +421,7 @@ function Reports() {
                   {deleteFilteredSales.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={6} align="center">
-                        No sales in this date range.
+                        No {saleTypeTab} sales in this date range.
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -389,7 +448,14 @@ function Reports() {
                               })
                             : '—'}
                         </TableCell>
-                        <TableCell>{sale.customerName}</TableCell>
+                        <TableCell>
+                          {sale.customerName}
+                          {sale.couponName ? (
+                            <Typography variant="caption" display="block" color="text.secondary">
+                              Coupon: {sale.couponName}
+                            </Typography>
+                          ) : null}
+                        </TableCell>
                         <TableCell>
                           {(sale.items || [])
                             .map((i) => `${i.mealName} x${i.quantity}`)
@@ -427,7 +493,7 @@ function Reports() {
                   {(report?.sales || []).length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={4} align="center">
-                        No sales in this period.
+                        No {saleTypeTab} sales in this period.
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -436,7 +502,14 @@ function Reports() {
                       .map((sale) => (
                         <TableRow key={sale.id}>
                           <TableCell>{sale.date}</TableCell>
-                          <TableCell>{sale.customerName}</TableCell>
+                          <TableCell>
+                            {sale.customerName}
+                            {sale.couponName ? (
+                              <Typography variant="caption" display="block" color="text.secondary">
+                                Coupon: {sale.couponName}
+                              </Typography>
+                            ) : null}
+                          </TableCell>
                           <TableCell>
                             {(sale.items || [])
                               .map((i) => `${i.mealName} x${i.quantity}`)
@@ -512,7 +585,7 @@ function Reports() {
 
             {filteredByDepartment.length === 0 ? (
               <Typography color="textSecondary">
-                No sales in this period{search ? ' matching your search.' : '.'}
+                No {saleTypeTab} sales in this period{search ? ' matching your search.' : '.'}
               </Typography>
             ) : (
               filteredByDepartment.map(({ department, customers }) => (

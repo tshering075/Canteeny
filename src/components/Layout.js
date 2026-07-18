@@ -24,6 +24,7 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 import PointOfSaleIcon from '@mui/icons-material/PointOfSale';
 import PeopleIcon from '@mui/icons-material/People';
 import RestaurantIcon from '@mui/icons-material/Restaurant';
+import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import LogoutIcon from '@mui/icons-material/Logout';
 import ManageAccountsIcon from '@mui/icons-material/ManageAccounts';
@@ -40,6 +41,7 @@ const baseNavItems = [
   { path: '/sales', label: 'Sales', icon: <PointOfSaleIcon /> },
   { path: '/customers', label: 'Customers', icon: <PeopleIcon /> },
   { path: '/meals', label: 'Meals', icon: <RestaurantIcon /> },
+  { path: '/coupons', label: 'Coupons', icon: <LocalOfferIcon /> },
   { path: '/reports', label: 'Reports', icon: <AssessmentIcon />},
   { path: '/users', label: 'Users & Permissions', icon: <ManageAccountsIcon /> },
   { path: '/activity', label: 'Activity', icon: <HistoryIcon /> },
@@ -307,7 +309,7 @@ function Layout({ onLogout, hasActiveAccess = true }) {
             zIndex: 1,
           }}
         >
-          Developed by Tshering Tamang & Gyen B. Baraily
+          Developed by Codewyn Dev
         </Typography>
       </Box>
     </Box>

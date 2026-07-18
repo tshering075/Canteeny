@@ -2,6 +2,7 @@ const STORAGE_KEYS = {
   CUSTOMERS: 'canteen_customers',
   MEALS: 'canteen_meals',
   SALES: 'canteen_sales',
+  COUPONS: 'canteen_coupons',
   AUTH_PASSWORD: 'canteen_auth_password',
   USERS: 'canteen_users',
   ACTIVITIES: 'canteen_activities',

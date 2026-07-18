@@ -42,6 +42,7 @@ import {
   formatExpiryDateTime,
   getDaysRemaining,
   getPlanPrice,
+  isFreeTrialPlan,
   isSubscriptionActive,
 } from '../services/subscriptionService';
 
@@ -70,6 +71,9 @@ function Subscription() {
   const fileInputRef = useRef(null);
 
   const tenantId = tenant?.id;
+  const hasUsedTrial = payments.some(
+    (p) => isFreeTrialPlan(p.planType) && p.status !== 'rejected'
+  );
 
   const load = useCallback(async () => {
     const [s, p] = await Promise.all([
@@ -84,12 +88,23 @@ function Subscription() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (hasUsedTrial && isFreeTrialPlan(planType)) {
+      setPlanType('monthly');
+    }
+  }, [hasUsedTrial, planType]);
+
   const handleSubmit = async () => {
     if (!tenant) return;
     setError('');
     setMessage('');
 
-    if (paymentMethod === 'mobile_pay' && !screenshot) {
+    if (isFreeTrialPlan(planType) && hasUsedTrial) {
+      setError('Free trial has already been used for this account.');
+      return;
+    }
+
+    if (!isFreeTrialPlan(planType) && paymentMethod === 'mobile_pay' && !screenshot) {
       setError('Please upload a payment screenshot for mobile pay.');
       return;
     }
@@ -99,11 +114,15 @@ function Subscription() {
       await submitPayment({
         tenantId: tenant.id,
         planType,
-        paymentMethod,
-        screenshotData: screenshot,
+        paymentMethod: isFreeTrialPlan(planType) ? 'cash' : paymentMethod,
+        screenshotData: isFreeTrialPlan(planType) ? '' : screenshot,
         notes,
       });
-      setMessage('Payment submitted successfully. Your invoice will be available in Payment History once the admin approves it.');
+      setMessage(
+        isFreeTrialPlan(planType)
+          ? 'Free trial activated! You have 14 days of full access.'
+          : 'Payment submitted successfully. Your invoice will be available in Payment History once the admin approves it.'
+      );
       setScreenshot('');
       setScreenshotName('');
       setNotes('');
@@ -148,6 +167,7 @@ function Subscription() {
 
   const daysLeft = getDaysRemaining(tenant.planExpiresAt);
   const active = isSubscriptionActive(tenant);
+  const selectingTrial = isFreeTrialPlan(planType);
 
   return (
     <Box>
@@ -210,14 +230,16 @@ function Subscription() {
               {Object.entries(PLAN_TYPES).map(([key, plan]) => {
                 const price = getPlanPrice(settings, key);
                 const monthlyPrice = getPlanPrice(settings, 'monthly');
-                const months = plan.months || 1;
+                const months = plan.months || 0;
                 const perMonth = months > 0 ? price / months : price;
-                const fullPrice = monthlyPrice * months;
+                const fullPrice = months > 0 ? monthlyPrice * months : 0;
                 const savings = fullPrice > price ? fullPrice - price : 0;
                 const selected = planType === key;
                 const isBestValue = key === 'annual';
+                const isTrial = isFreeTrialPlan(key);
+                const trialUsed = isTrial && hasUsedTrial;
                 return (
-                  <Grid item xs={12} sm={4} key={key}>
+                  <Grid item xs={12} sm={6} md={3} key={key}>
                     <Card
                       variant="outlined"
                       sx={{
@@ -229,7 +251,10 @@ function Subscription() {
                         bgcolor: selected ? 'action.selected' : 'background.paper',
                         transition: 'all 0.15s ease',
                         boxShadow: selected ? 4 : 0,
-                        '&:hover': { borderColor: 'primary.main', boxShadow: 2 },
+                        opacity: trialUsed ? 0.55 : 1,
+                        '&:hover': trialUsed
+                          ? undefined
+                          : { borderColor: 'primary.main', boxShadow: 2 },
                       }}
                     >
                       {isBestValue && (
@@ -247,8 +272,24 @@ function Subscription() {
                           }}
                         />
                       )}
+                      {isTrial && !trialUsed && (
+                        <Chip
+                          label="Free"
+                          color="success"
+                          size="small"
+                          sx={{
+                            position: 'absolute',
+                            top: 10,
+                            right: 10,
+                            height: 20,
+                            fontSize: '0.65rem',
+                            fontWeight: 700,
+                          }}
+                        />
+                      )}
                       <CardActionArea
-                        onClick={() => setPlanType(key)}
+                        onClick={() => !trialUsed && setPlanType(key)}
+                        disabled={trialUsed}
                         sx={{ height: '100%', p: 2 }}
                       >
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
@@ -262,10 +303,16 @@ function Subscription() {
                           </Typography>
                         </Box>
                         <Typography variant="h5" fontWeight={800} color="primary.main">
-                          Nu. {price.toLocaleString()}
+                          {isTrial ? 'Free' : `Nu. ${price.toLocaleString()}`}
                         </Typography>
                         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-                          {months > 1 ? `≈ Nu. ${Math.round(perMonth).toLocaleString()}/month` : 'Billed monthly'}
+                          {isTrial
+                            ? trialUsed
+                              ? 'Already used'
+                              : '14 days full access'
+                            : months > 1
+                              ? `≈ Nu. ${Math.round(perMonth).toLocaleString()}/month`
+                              : 'Billed monthly'}
                         </Typography>
                         {savings > 0 && (
                           <Chip
@@ -283,6 +330,7 @@ function Subscription() {
               })}
             </Grid>
 
+            {!selectingTrial && (
             <FormControl component="fieldset" sx={{ mb: 2, width: '100%' }}>
               <FormLabel>Payment Method</FormLabel>
               <RadioGroup
@@ -293,8 +341,9 @@ function Subscription() {
                 <FormControlLabel value="mobile_pay" control={<Radio />} label="Mobile Pay" />
               </RadioGroup>
             </FormControl>
+            )}
 
-            {paymentMethod === 'mobile_pay' && (
+            {!selectingTrial && paymentMethod === 'mobile_pay' && (
               <Box sx={{ mb: 2 }}>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                   {settings?.mobilePayInstructions}
@@ -366,6 +415,13 @@ function Subscription() {
               </Box>
             )}
 
+            {selectingTrial && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Start your 14-day free trial with full access. No payment required.
+                {hasUsedTrial ? ' This account has already used the free trial.' : ''}
+              </Alert>
+            )}
+
             <TextField
               fullWidth
               label="Notes (optional)"
@@ -392,9 +448,13 @@ function Subscription() {
               size="large"
               startIcon={<PaymentIcon />}
               onClick={handleSubmit}
-              disabled={loading}
+              disabled={loading || (selectingTrial && hasUsedTrial)}
             >
-              {loading ? 'Submitting...' : 'Submit Payment'}
+              {loading
+                ? 'Submitting...'
+                : selectingTrial
+                  ? 'Start Free Trial'
+                  : 'Submit Payment'}
             </Button>
           </Paper>
         </Grid>
@@ -428,7 +488,13 @@ function Subscription() {
                         {p.status === 'approved' ? resolveInvoiceNumber(p) : '—'}
                       </TableCell>
                       <TableCell>{PLAN_TYPES[p.planType]?.label}</TableCell>
-                      <TableCell>{p.paymentMethod === 'cash' ? 'Cash' : 'Mobile Pay'}</TableCell>
+                      <TableCell>
+                        {isFreeTrialPlan(p.planType)
+                          ? 'Free Trial'
+                          : p.paymentMethod === 'cash'
+                            ? 'Cash'
+                            : 'Mobile Pay'}
+                      </TableCell>
                       <TableCell>Nu. {p.amount.toLocaleString()}</TableCell>
                       <TableCell>
                         <Chip

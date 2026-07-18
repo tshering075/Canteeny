@@ -141,7 +141,7 @@ function Login({ onLogin }) {
           zIndex: 2,
         }}
       >
-        Developed by Tshering Tamang & Gyen B. Baraily
+        Developed by Codewyn Dev
       </Typography>
     </Box>
   );
