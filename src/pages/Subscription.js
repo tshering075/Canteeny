@@ -94,6 +94,12 @@ function Subscription() {
     }
   }, [hasUsedTrial, planType]);
 
+  useEffect(() => {
+    if (settings && settings.freeTrialEnabled === false && isFreeTrialPlan(planType)) {
+      setPlanType('monthly');
+    }
+  }, [settings, planType]);
+
   const handleSubmit = async () => {
     if (!tenant) return;
     setError('');
@@ -101,6 +107,11 @@ function Subscription() {
 
     if (isFreeTrialPlan(planType) && hasUsedTrial) {
       setError('Free trial has already been used for this account.');
+      return;
+    }
+
+    if (isFreeTrialPlan(planType) && settings?.freeTrialEnabled === false) {
+      setError('Free trial is currently disabled by the platform owner.');
       return;
     }
 
@@ -167,7 +178,11 @@ function Subscription() {
 
   const daysLeft = getDaysRemaining(tenant.planExpiresAt);
   const active = isSubscriptionActive(tenant);
+  const freeTrialEnabled = settings?.freeTrialEnabled !== false;
   const selectingTrial = isFreeTrialPlan(planType);
+  const availablePlans = Object.entries(PLAN_TYPES).filter(
+    ([key]) => freeTrialEnabled || !isFreeTrialPlan(key)
+  );
 
   return (
     <Box>
@@ -227,7 +242,7 @@ function Subscription() {
 
             <FormLabel sx={{ mb: 1.5, display: 'block' }}>Select Plan</FormLabel>
             <Grid container spacing={2} sx={{ mb: 3 }}>
-              {Object.entries(PLAN_TYPES).map(([key, plan]) => {
+              {availablePlans.map(([key, plan]) => {
                 const price = getPlanPrice(settings, key);
                 const monthlyPrice = getPlanPrice(settings, 'monthly');
                 const months = plan.months || 0;

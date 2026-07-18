@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS = {
   monthlyPrice: 500,
   sixMonthPrice: 2700,
   annualPrice: 5000,
+  freeTrialEnabled: true,
   mobilePayInstructions: 'Scan the QR code or copy the account number, then upload your payment screenshot.',
 };
 
@@ -24,6 +25,8 @@ const toSettings = (row) =>
         monthlyPrice: Number(row.monthly_price) || 0,
         sixMonthPrice: Number(row.six_month_price) || 0,
         annualPrice: Number(row.annual_price) || 0,
+        // Default true when column missing (pre-migration) so existing behavior continues.
+        freeTrialEnabled: row.free_trial_enabled !== false && row.freeTrialEnabled !== false,
         mobilePayInstructions: row.mobile_pay_instructions || '',
       }
     : null;
@@ -37,7 +40,12 @@ export async function getPlatformSettings() {
       return settings;
     }
   }
-  return getFromStorage(STORAGE_KEYS.PLATFORM_SETTINGS, DEFAULT_SETTINGS);
+  const stored = getFromStorage(STORAGE_KEYS.PLATFORM_SETTINGS, DEFAULT_SETTINGS);
+  return {
+    ...DEFAULT_SETTINGS,
+    ...stored,
+    freeTrialEnabled: stored?.freeTrialEnabled !== false,
+  };
 }
 
 export async function updatePlatformSettings(updates) {
@@ -52,24 +60,54 @@ export async function updatePlatformSettings(updates) {
     if (updates.monthlyPrice !== undefined) payload.monthly_price = updates.monthlyPrice;
     if (updates.sixMonthPrice !== undefined) payload.six_month_price = updates.sixMonthPrice;
     if (updates.annualPrice !== undefined) payload.annual_price = updates.annualPrice;
+    if (updates.freeTrialEnabled !== undefined) {
+      payload.free_trial_enabled = updates.freeTrialEnabled !== false;
+    }
     if (updates.mobilePayInstructions !== undefined) {
       payload.mobile_pay_instructions = updates.mobilePayInstructions;
     }
     payload.updated_at = new Date().toISOString();
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('platform_settings')
       .update(payload)
       .eq('id', current.id)
       .select()
       .single();
+
+    // Retry without free_trial_enabled if column not migrated yet.
+    if (error && payload.free_trial_enabled !== undefined && /free_trial_enabled/i.test(error.message || '')) {
+      const { free_trial_enabled, ...rest } = payload;
+      ({ data, error } = await supabase
+        .from('platform_settings')
+        .update(rest)
+        .eq('id', current.id)
+        .select()
+        .single());
+      if (!error && data) {
+        const settings = {
+          ...toSettings(data),
+          freeTrialEnabled: updates.freeTrialEnabled !== false,
+        };
+        setInStorage(STORAGE_KEYS.PLATFORM_SETTINGS, settings);
+        return settings;
+      }
+    }
+
     if (error) throw new Error(error.message || 'Failed to update settings');
     const settings = toSettings(data);
     setInStorage(STORAGE_KEYS.PLATFORM_SETTINGS, settings);
     return settings;
   }
 
-  const settings = { ...current, ...updates };
+  const settings = {
+    ...current,
+    ...updates,
+    freeTrialEnabled:
+      updates.freeTrialEnabled !== undefined
+        ? updates.freeTrialEnabled !== false
+        : current.freeTrialEnabled !== false,
+  };
   setInStorage(STORAGE_KEYS.PLATFORM_SETTINGS, settings);
   return settings;
 }

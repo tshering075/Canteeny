@@ -60,6 +60,11 @@ export async function submitPayment({ tenantId, planType, paymentMethod, screens
   const settings = await getPlatformSettings();
   const amount = getPlanPrice(settings, planType);
   const isTrial = isFreeTrialPlan(planType);
+
+  if (isTrial && settings?.freeTrialEnabled === false) {
+    throw new Error('Free trial is currently disabled by the platform owner.');
+  }
+
   const submittedAt = new Date().toISOString();
   const invoiceNumber = generateInvoiceNumber(submittedAt);
   // Free trial activates immediately — no payment review needed.

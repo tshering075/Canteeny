@@ -10,9 +10,11 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControlLabel,
   Grid,
   IconButton,
   Paper,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -678,6 +680,36 @@ export function AdminSettings() {
           onChange={(e) => setSettings({ ...settings, annualPrice: Number(e.target.value) })}
           sx={{ mb: 3 }}
         />
+
+        <Typography variant="h6" gutterBottom>Free Trial</Typography>
+        <FormControlLabel
+          sx={{ mb: 1, display: 'flex', alignItems: 'flex-start', ml: 0 }}
+          control={
+            <Switch
+              checked={settings.freeTrialEnabled !== false}
+              onChange={(e) =>
+                setSettings({ ...settings, freeTrialEnabled: e.target.checked })
+              }
+            />
+          }
+          label={
+            <Box>
+              <Typography variant="body1" fontWeight={600}>
+                {settings.freeTrialEnabled !== false
+                  ? 'Free trial enabled for clients'
+                  : 'Free trial disabled for clients'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                When enabled, clients can start a 14-day free trial from the Subscription page.
+              </Typography>
+            </Box>
+          }
+        />
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          {settings.freeTrialEnabled !== false
+            ? 'Clients currently see and can activate the 14-day free trial plan.'
+            : 'The free trial plan is hidden from clients until you enable it again.'}
+        </Typography>
 
         <Typography variant="h6" gutterBottom>Mobile Pay Details</Typography>
         <TextField
