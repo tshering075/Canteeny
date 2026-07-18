@@ -95,10 +95,12 @@ function Subscription() {
   }, [hasUsedTrial, planType]);
 
   useEffect(() => {
-    if (settings && settings.freeTrialEnabled === false && isFreeTrialPlan(planType)) {
+    const allowed =
+      settings?.freeTrialEnabled !== false && tenant?.freeTrialEnabled !== false;
+    if (settings && !allowed && isFreeTrialPlan(planType)) {
       setPlanType('monthly');
     }
-  }, [settings, planType]);
+  }, [settings, tenant, planType]);
 
   const handleSubmit = async () => {
     if (!tenant) return;
@@ -110,8 +112,11 @@ function Subscription() {
       return;
     }
 
-    if (isFreeTrialPlan(planType) && settings?.freeTrialEnabled === false) {
-      setError('Free trial is currently disabled by the platform owner.');
+    if (
+      isFreeTrialPlan(planType) &&
+      (settings?.freeTrialEnabled === false || tenant.freeTrialEnabled === false)
+    ) {
+      setError('Free trial is not available for your account. Contact support.');
       return;
     }
 
@@ -178,7 +183,8 @@ function Subscription() {
 
   const daysLeft = getDaysRemaining(tenant.planExpiresAt);
   const active = isSubscriptionActive(tenant);
-  const freeTrialEnabled = settings?.freeTrialEnabled !== false;
+  const freeTrialEnabled =
+    settings?.freeTrialEnabled !== false && tenant?.freeTrialEnabled !== false;
   const selectingTrial = isFreeTrialPlan(planType);
   const availablePlans = Object.entries(PLAN_TYPES).filter(
     ([key]) => freeTrialEnabled || !isFreeTrialPlan(key)

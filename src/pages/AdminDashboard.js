@@ -125,6 +125,7 @@ export function AdminClients() {
     contactPhone: '',
     contactEmail: '',
     planType: 'monthly',
+    freeTrialEnabled: true,
     initialUserId: '',
     initialPassword: '',
   });
@@ -136,6 +137,7 @@ export function AdminClients() {
     contactEmail: '',
     planType: 'monthly',
     planExpiresAt: '',
+    freeTrialEnabled: true,
   });
   const [error, setError] = useState('');
   const [editError, setEditError] = useState('');
@@ -177,6 +179,7 @@ export function AdminClients() {
         contactPhone: '',
         contactEmail: '',
         planType: 'monthly',
+        freeTrialEnabled: true,
         initialUserId: '',
         initialPassword: '',
       });
@@ -206,8 +209,18 @@ export function AdminClients() {
       contactEmail: tenant.contactEmail || '',
       planType: tenant.planType || 'monthly',
       planExpiresAt: toDateTimeLocal(tenant.planExpiresAt),
+      freeTrialEnabled: tenant.freeTrialEnabled !== false,
     });
     setEditDialogOpen(true);
+  };
+
+  const handleToggleClientTrial = async (tenant, enabled) => {
+    try {
+      await tenantService.updateTenant(tenant.id, { freeTrialEnabled: enabled });
+      await load();
+    } catch (err) {
+      window.alert(err.message || 'Failed to update free trial access');
+    }
   };
 
   const openDelete = (tenant) => {
@@ -243,6 +256,7 @@ export function AdminClients() {
         contactEmail: editForm.contactEmail,
         planType: editForm.planType,
         planExpiresAt,
+        freeTrialEnabled: editForm.freeTrialEnabled !== false,
       };
       if (planExpiresAt && new Date(planExpiresAt) > new Date()) {
         updates.status = 'active';
@@ -277,6 +291,7 @@ export function AdminClients() {
               <TableCell>Expires</TableCell>
               <TableCell>Days Left</TableCell>
               <TableCell>Status</TableCell>
+              <TableCell align="center">Free Trial</TableCell>
               <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -311,6 +326,14 @@ export function AdminClients() {
                 <TableCell>{formatExpiryDateTime(t.planExpiresAt)}</TableCell>
                 <TableCell>{getDaysRemaining(t.planExpiresAt)}</TableCell>
                 <TableCell><StatusChip status={t.status} /></TableCell>
+                <TableCell align="center">
+                  <Switch
+                    size="small"
+                    checked={t.freeTrialEnabled !== false}
+                    onChange={(e) => handleToggleClientTrial(t, e.target.checked)}
+                    inputProps={{ 'aria-label': `Free trial for ${t.name}` }}
+                  />
+                </TableCell>
                 <TableCell align="right">
                   <IconButton color="primary" title="Edit client" onClick={() => openEdit(t)}>
                     <EditIcon />
@@ -354,6 +377,16 @@ export function AdminClients() {
               <option key={key} value={key}>{plan.label}</option>
             ))}
           </TextField>
+          <FormControlLabel
+            sx={{ mb: 2, ml: 0, display: 'flex' }}
+            control={
+              <Switch
+                checked={form.freeTrialEnabled !== false}
+                onChange={(e) => setForm({ ...form, freeTrialEnabled: e.target.checked })}
+              />
+            }
+            label="Allow 14-day free trial for this client"
+          />
           <Typography variant="subtitle2" sx={{ mb: 1 }}>Initial Login (optional)</Typography>
           <TextField fullWidth label="User ID" value={form.initialUserId} onChange={(e) => setForm({ ...form, initialUserId: e.target.value })} sx={{ mb: 2 }} />
           <TextField fullWidth label="Password" type="password" value={form.initialPassword} onChange={(e) => setForm({ ...form, initialPassword: e.target.value })} sx={{ mb: 2 }} />
@@ -425,6 +458,18 @@ export function AdminClients() {
             onChange={(e) => setEditForm({ ...editForm, planExpiresAt: e.target.value })}
             InputLabelProps={{ shrink: true }}
             sx={{ mb: 2 }}
+          />
+          <FormControlLabel
+            sx={{ mb: 2, ml: 0, display: 'flex' }}
+            control={
+              <Switch
+                checked={editForm.freeTrialEnabled !== false}
+                onChange={(e) =>
+                  setEditForm({ ...editForm, freeTrialEnabled: e.target.checked })
+                }
+              />
+            }
+            label="Allow 14-day free trial for this client"
           />
           {editError && <Alert severity="error">{editError}</Alert>}
         </DialogContent>
@@ -707,8 +752,8 @@ export function AdminSettings() {
         />
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           {settings.freeTrialEnabled !== false
-            ? 'Clients currently see and can activate the 14-day free trial plan.'
-            : 'The free trial plan is hidden from clients until you enable it again.'}
+            ? 'Clients currently see and can activate the 14-day free trial plan (only if also enabled for that client).'
+            : 'The free trial plan is hidden from all clients until you enable it again. Per-client toggles on Manage Clients are ignored while this is off.'}
         </Typography>
 
         <Typography variant="h6" gutterBottom>Mobile Pay Details</Typography>

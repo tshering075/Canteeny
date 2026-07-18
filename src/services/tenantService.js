@@ -15,6 +15,7 @@ const toTenant = (row) =>
         status: row.status || 'active',
         planType: row.plan_type || null,
         planExpiresAt: row.plan_expires_at || null,
+        freeTrialEnabled: row.free_trial_enabled !== false && row.freeTrialEnabled !== false,
         createdAt: row.created_at,
       }
     : null;
@@ -28,6 +29,7 @@ const DEFAULT_TENANT = {
   status: 'active',
   planType: 'annual',
   planExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+  freeTrialEnabled: true,
   createdAt: new Date().toISOString(),
 };
 
@@ -45,7 +47,10 @@ export async function getTenants() {
     tenants = [DEFAULT_TENANT];
     setInStorage(STORAGE_KEYS.TENANTS, tenants);
   }
-  return tenants;
+  return tenants.map((t) => ({
+    ...t,
+    freeTrialEnabled: t.freeTrialEnabled !== false,
+  }));
 }
 
 export async function getTenantById(id) {
@@ -59,6 +64,7 @@ export async function createTenant({
   contactPhone,
   contactEmail,
   planType,
+  freeTrialEnabled = true,
   initialUserId,
   initialPassword,
 }) {
@@ -70,14 +76,23 @@ export async function createTenant({
     status: 'active',
     plan_type: planType || 'monthly',
     plan_expires_at: extendExpiryDate(null, planType || 'monthly'),
+    free_trial_enabled: freeTrialEnabled !== false,
   };
 
   let tenant = null;
 
   if (supabase) {
-    const { data, error } = await supabase.from('tenants').insert(payload).select().single();
+    let { data, error } = await supabase.from('tenants').insert(payload).select().single();
+    if (error && /free_trial_enabled/i.test(error.message || '')) {
+      const { free_trial_enabled, ...legacyPayload } = payload;
+      ({ data, error } = await supabase.from('tenants').insert(legacyPayload).select().single());
+      if (!error && data) {
+        tenant = { ...toTenant(data), freeTrialEnabled: freeTrialEnabled !== false };
+      }
+    } else if (!error) {
+      tenant = toTenant(data);
+    }
     if (error) throw new Error(error.message || 'Failed to create tenant');
-    tenant = toTenant(data);
     const tenants = getFromStorage(STORAGE_KEYS.TENANTS, []);
     tenants.push(tenant);
     setInStorage(STORAGE_KEYS.TENANTS, tenants);
@@ -91,6 +106,7 @@ export async function createTenant({
       status: payload.status,
       planType: payload.plan_type,
       planExpiresAt: payload.plan_expires_at,
+      freeTrialEnabled: freeTrialEnabled !== false,
       createdAt: new Date().toISOString(),
     };
     const tenants = getFromStorage(STORAGE_KEYS.TENANTS, []);
@@ -126,14 +142,49 @@ export async function updateTenant(id, updates) {
   if (updates.status !== undefined) payload.status = updates.status;
   if (updates.planType !== undefined) payload.plan_type = updates.planType;
   if (updates.planExpiresAt !== undefined) payload.plan_expires_at = updates.planExpiresAt;
+  if (updates.freeTrialEnabled !== undefined) {
+    payload.free_trial_enabled = updates.freeTrialEnabled !== false;
+  }
 
-  if (supabase) {
-    const { data, error } = await supabase
+  if (supabase && Object.keys(payload).length > 0) {
+    let { data, error } = await supabase
       .from('tenants')
       .update(payload)
       .eq('id', id)
       .select()
       .single();
+
+    if (error && payload.free_trial_enabled !== undefined && /free_trial_enabled/i.test(error.message || '')) {
+      const { free_trial_enabled, ...rest } = payload;
+      if (Object.keys(rest).length === 0) {
+        // Column missing — keep flag in local cache only.
+        const tenants = getFromStorage(STORAGE_KEYS.TENANTS, []);
+        const idx = tenants.findIndex((t) => t.id === id);
+        if (idx >= 0) {
+          tenants[idx] = {
+            ...tenants[idx],
+            freeTrialEnabled: updates.freeTrialEnabled !== false,
+          };
+          setInStorage(STORAGE_KEYS.TENANTS, tenants);
+          return tenants[idx];
+        }
+        throw new Error(error.message || 'Failed to update tenant');
+      }
+      ({ data, error } = await supabase.from('tenants').update(rest).eq('id', id).select().single());
+      if (!error && data) {
+        const tenant = {
+          ...toTenant(data),
+          freeTrialEnabled: updates.freeTrialEnabled !== false,
+        };
+        const tenants = getFromStorage(STORAGE_KEYS.TENANTS, []);
+        const idx = tenants.findIndex((t) => t.id === id);
+        if (idx >= 0) tenants[idx] = tenant;
+        else tenants.push(tenant);
+        setInStorage(STORAGE_KEYS.TENANTS, tenants);
+        return tenant;
+      }
+    }
+
     if (error) throw new Error(error.message || 'Failed to update tenant');
     const tenant = toTenant(data);
     const tenants = getFromStorage(STORAGE_KEYS.TENANTS, []);

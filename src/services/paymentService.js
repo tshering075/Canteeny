@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { getFromStorage, setInStorage, generateId, STORAGE_KEYS } from './storage';
-import { extendTenantPlan } from './tenantService';
+import { extendTenantPlan, getTenantById } from './tenantService';
 import { getPlanPrice, isFreeTrialPlan } from './subscriptionService';
 import { getPlatformSettings } from './platformService';
 import { generateInvoiceNumber } from '../utils/invoicePdf';
@@ -63,6 +63,13 @@ export async function submitPayment({ tenantId, planType, paymentMethod, screens
 
   if (isTrial && settings?.freeTrialEnabled === false) {
     throw new Error('Free trial is currently disabled by the platform owner.');
+  }
+
+  if (isTrial) {
+    const tenant = await getTenantById(tenantId);
+    if (tenant && tenant.freeTrialEnabled === false) {
+      throw new Error('Free trial is not enabled for this client.');
+    }
   }
 
   const submittedAt = new Date().toISOString();
