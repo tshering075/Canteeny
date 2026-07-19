@@ -30,6 +30,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import ManageAccountsIcon from '@mui/icons-material/ManageAccounts';
 import HistoryIcon from '@mui/icons-material/History';
 import PaymentIcon from '@mui/icons-material/Payment';
+import ContactSupportIcon from '@mui/icons-material/ContactSupport';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import SubscriptionBanner from './SubscriptionBanner';
@@ -46,6 +47,7 @@ const baseNavItems = [
   { path: '/users', label: 'Users & Permissions', icon: <ManageAccountsIcon /> },
   { path: '/activity', label: 'Activity', icon: <HistoryIcon /> },
   { path: '/subscription', label: 'Subscription', icon: <PaymentIcon /> },
+  { path: '/contact', label: 'Contact Us', icon: <ContactSupportIcon /> },
 ];
 
 function Layout({ onLogout, hasActiveAccess = true }) {
@@ -58,7 +60,7 @@ function Layout({ onLogout, hasActiveAccess = true }) {
 
   const navItems = hasActiveAccess
     ? baseNavItems
-    : baseNavItems.filter((item) => item.path === '/subscription');
+    : baseNavItems.filter((item) => item.path === '/subscription' || item.path === '/contact');
 
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
 

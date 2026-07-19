@@ -56,6 +56,7 @@ import {
   downloadCustomerBillPDF,
   downloadCustomerBillExcel,
 } from '../utils/exportReport';
+import { formatDisplayDate, formatDisplayDates } from '../utils/dateFormat';
 
 function Reports() {
   const { sales, customers, refreshData } = useAppState();
@@ -331,10 +332,10 @@ function Reports() {
       <Paper sx={{ p: 3, borderRadius: 2 }}>
         <Typography variant="h6" gutterBottom>
           {mode === 'daily'
-            ? `${saleTypeLabel} Daily Report - ${date}`
+            ? `${saleTypeLabel} Daily Report - ${formatDisplayDate(date)}`
             : mode === 'monthly'
-              ? `${saleTypeLabel} Monthly Report - ${startDate} to ${endDate}`
-              : `Delete ${saleTypeLabel} Sales - ${deleteStartDate} to ${deleteEndDate}`}
+              ? `${saleTypeLabel} Monthly Report - ${formatDisplayDate(startDate)} to ${formatDisplayDate(endDate)}`
+              : `Delete ${saleTypeLabel} Sales - ${formatDisplayDate(deleteStartDate)} to ${formatDisplayDate(deleteEndDate)}`}
         </Typography>
 
         {mode === 'delete' && (
@@ -439,7 +440,7 @@ function Reports() {
                             onChange={() => toggleSaleSelection(sale.id)}
                           />
                         </TableCell>
-                        <TableCell>{sale.date}</TableCell>
+                        <TableCell>{formatDisplayDate(sale.date)}</TableCell>
                         <TableCell sx={{ whiteSpace: 'nowrap' }}>
                           {sale.createdAt
                             ? new Date(sale.createdAt).toLocaleTimeString([], {
@@ -501,7 +502,7 @@ function Reports() {
                       .sort((a, b) => new Date(b.date) - new Date(a.date))
                       .map((sale) => (
                         <TableRow key={sale.id}>
-                          <TableCell>{sale.date}</TableCell>
+                          <TableCell>{formatDisplayDate(sale.date)}</TableCell>
                           <TableCell>
                             {sale.customerName}
                             {sale.couponName ? (
@@ -610,16 +611,11 @@ function Reports() {
                       </TableHead>
                       <TableBody>
                         {customers.map((c) => {
-                          const datesText =
-                            (c.saleDates || []).length > 0
-                              ? (c.saleDates || []).join(', ')
-                              : '-';
-
                           return (
                             <TableRow
                               key={c.customerId || c.name + c.department}
                             >
-                              <TableCell>{datesText}</TableCell>
+                              <TableCell>{formatDisplayDates(c.saleDates)}</TableCell>
                               <TableCell>{c.name}</TableCell>
                               <TableCell>{c.department}</TableCell>
                               <TableCell>{c.employeeType || '-'}</TableCell>
@@ -714,7 +710,7 @@ function Reports() {
                       if (items.length === 0) {
                         return (
                           <TableRow key={txnIdx}>
-                            <TableCell>{txn.date}</TableCell>
+                            <TableCell>{formatDisplayDate(txn.date)}</TableCell>
                             <TableCell colSpan={3}>-</TableCell>
                             <TableCell align="right">Nu {(txn.totalAmount || 0).toFixed(2)}</TableCell>
                           </TableRow>
@@ -723,7 +719,7 @@ function Reports() {
                       return items.map((item, itemIdx) => (
                         <TableRow key={`${txnIdx}-${itemIdx}`}>
                           <TableCell sx={{ verticalAlign: 'top' }}>
-                            {itemIdx === 0 ? txn.date : ''}
+                            {itemIdx === 0 ? formatDisplayDate(txn.date) : ''}
                           </TableCell>
                           <TableCell>{item.mealName}</TableCell>
                           <TableCell align="center">{item.quantity}</TableCell>

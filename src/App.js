@@ -18,6 +18,7 @@ import Reports from './pages/Reports';
 import Users from './pages/Users';
 import Activity from './pages/Activity';
 import Subscription from './pages/Subscription';
+import ContactUs from './pages/ContactUs';
 import {
   AdminOverview,
   AdminClients,
@@ -85,6 +86,7 @@ function AppRoutes() {
     <Routes>
       <Route element={<Layout onLogout={logout} hasActiveAccess={hasActiveAccess} />}>
         <Route path="/subscription" element={<Subscription />} />
+        <Route path="/contact" element={<ContactUs />} />
         <Route
           path="/"
           element={

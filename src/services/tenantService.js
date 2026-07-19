@@ -255,6 +255,7 @@ export async function deleteTenant(id) {
   filterOut(STORAGE_KEYS.SALES);
   filterOut(STORAGE_KEYS.USERS);
   filterOut(STORAGE_KEYS.PAYMENTS);
+  filterOut(STORAGE_KEYS.ACTIVITIES);
 
   const tenants = getFromStorage(STORAGE_KEYS.TENANTS, []);
   setInStorage(

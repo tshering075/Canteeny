@@ -1,8 +1,42 @@
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import { formatDisplayDate, formatDisplayDates } from './dateFormat';
+
+// Match invoice PDF palette (Supabase-style clean report)
+const INK = [23, 23, 23];
+const MUTED = [100, 116, 139];
+const BORDER = [226, 232, 240];
+const HEADER_BG = [248, 250, 252];
+const ACCENT = [62, 207, 142];
+const PAGE_W = 210;
+const MARGIN = 18;
 
 const TABLE_COLS = ['Dates', 'Customer Name', 'Department', 'Employee Type', 'Total Bill (Nu)'];
+
+const cleanTableTheme = {
+  theme: 'plain',
+  styles: {
+    font: 'helvetica',
+    fontSize: 9,
+    textColor: INK,
+    cellPadding: { top: 5, bottom: 5, left: 3, right: 3 },
+    lineColor: BORDER,
+    lineWidth: 0.2,
+    valign: 'middle',
+  },
+  headStyles: {
+    font: 'helvetica',
+    fontStyle: 'bold',
+    fillColor: HEADER_BG,
+    textColor: MUTED,
+    fontSize: 8,
+    cellPadding: { top: 4, bottom: 4, left: 3, right: 3 },
+  },
+  alternateRowStyles: {
+    fillColor: [255, 255, 255],
+  },
+};
 
 function normalizeSaleTypeLabel(saleTypeLabel) {
   const label = (saleTypeLabel || 'Credit').toString().trim();
@@ -11,49 +45,102 @@ function normalizeSaleTypeLabel(saleTypeLabel) {
 }
 
 function reportTitle(saleTypeLabel) {
-  return `Canteeny - ${normalizeSaleTypeLabel(saleTypeLabel)} Sales Report`;
+  return `${normalizeSaleTypeLabel(saleTypeLabel)} Sales Report`;
 }
 
 function reportFileSlug(saleTypeLabel) {
   return normalizeSaleTypeLabel(saleTypeLabel).toLowerCase().replace(/\s+/g, '-');
 }
 
+function formatMoney(n) {
+  return `Nu ${(Number(n) || 0).toFixed(2)}`;
+}
+
+function drawReportHeader(doc, { title, metaLines }) {
+  const right = PAGE_W - MARGIN;
+  doc.setFillColor(...ACCENT);
+  doc.rect(0, 0, PAGE_W, 3, 'F');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(...INK);
+  doc.text('Canteeny', MARGIN, 18);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(...MUTED);
+  doc.text('Sales report', MARGIN, 24);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.setTextColor(...INK);
+  doc.text(title, right, 18, { align: 'right' });
+
+  doc.setDrawColor(...BORDER);
+  doc.setLineWidth(0.4);
+  doc.line(MARGIN, 30, right, 30);
+
+  let y = 38;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(...MUTED);
+  (metaLines || []).forEach((line) => {
+    doc.text(line, MARGIN, y);
+    y += 5;
+  });
+  return y + 4;
+}
+
 // Format customer for export (no View column)
 function rowFromCustomer(c) {
-  const datesText = (c.saleDates || []).length > 0
-    ? (c.saleDates || []).join(', ')
-    : '-';
-  return [datesText, c.name, c.department, c.employeeType || '-', `Nu ${(c.totalAmount || 0).toFixed(2)}`];
+  const datesText = formatDisplayDates(c.saleDates);
+  return [datesText, c.name, c.department, c.employeeType || '-', formatMoney(c.totalAmount)];
 }
 
 function buildMonthlyReportDoc(byDepartment, grandTotal, startDate, endDate, saleTypeLabel) {
   const typeLabel = normalizeSaleTypeLabel(saleTypeLabel);
   const doc = new jsPDF();
-  doc.setFontSize(18);
-  doc.text(reportTitle(typeLabel), 14, 22);
-  doc.setFontSize(11);
-  doc.text(`Sale Type: ${typeLabel}`, 14, 30);
-  doc.text(`Period: ${startDate} to ${endDate}`, 14, 37);
-  doc.text(`Grand Total: Nu ${(grandTotal || 0).toFixed(2)}`, 14, 44);
+  doc.setFont('helvetica', 'normal');
 
-  let startY = 52;
+  let startY = drawReportHeader(doc, {
+    title: reportTitle(typeLabel),
+    metaLines: [
+      `Sale type: ${typeLabel}`,
+      `Period: ${formatDisplayDate(startDate)} to ${formatDisplayDate(endDate)}`,
+      `Grand total: ${formatMoney(grandTotal)}`,
+    ],
+  });
 
   (byDepartment || []).forEach(({ department, customers }) => {
-    doc.setFontSize(12);
-    doc.setTextColor(0, 100, 180);
-    doc.text(department, 14, startY);
-    startY += 8;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...INK);
+    doc.text(department, MARGIN, startY);
+    startY += 6;
 
     const body = customers.map(rowFromCustomer);
     doc.autoTable({
       head: [TABLE_COLS],
       body,
       startY,
-      theme: 'grid',
-      headStyles: { fillColor: [244, 0, 9] },
+      margin: { left: MARGIN, right: MARGIN },
+      ...cleanTableTheme,
+      columnStyles: {
+        4: { halign: 'right' },
+      },
     });
     startY = doc.lastAutoTable.finalY + 12;
   });
+
+  // Footer total
+  const right = PAGE_W - MARGIN;
+  doc.setDrawColor(...BORDER);
+  doc.line(MARGIN, startY - 4, right, startY - 4);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...INK);
+  doc.text('Grand total', MARGIN, startY + 4);
+  doc.text(formatMoney(grandTotal), right, startY + 4, { align: 'right' });
 
   return doc;
 }
@@ -71,9 +158,9 @@ export function downloadReportExcel(byDepartment, grandTotal, startDate, endDate
   XLSX.utils.book_append_sheet(
     wb,
     XLSX.utils.aoa_to_sheet([
-      ['Report', reportTitle(typeLabel)],
+      ['Report', `Canteeny - ${reportTitle(typeLabel)}`],
       ['Sale Type', typeLabel],
-      ['Period', `${startDate} to ${endDate}`],
+      ['Period', `${formatDisplayDate(startDate)} to ${formatDisplayDate(endDate)}`],
       ['Grand Total (Nu)', (grandTotal || 0).toFixed(2)],
     ]),
     'Summary'
@@ -81,7 +168,7 @@ export function downloadReportExcel(byDepartment, grandTotal, startDate, endDate
 
   (byDepartment || []).forEach(({ department, customers }) => {
     const data = customers.map((c) => ({
-      'Dates': (c.saleDates || []).join(', ') || '-',
+      'Dates': formatDisplayDates(c.saleDates),
       'Customer Name': c.name,
       'Department': c.department,
       'Employee Type': c.employeeType || '-',
@@ -107,16 +194,16 @@ export function getReportExcelBlob(byDepartment, grandTotal, startDate, endDate,
   XLSX.utils.book_append_sheet(
     wb,
     XLSX.utils.aoa_to_sheet([
-      ['Report', reportTitle(typeLabel)],
+      ['Report', `Canteeny - ${reportTitle(typeLabel)}`],
       ['Sale Type', typeLabel],
-      ['Period', `${startDate} to ${endDate}`],
+      ['Period', `${formatDisplayDate(startDate)} to ${formatDisplayDate(endDate)}`],
       ['Grand Total (Nu)', (grandTotal || 0).toFixed(2)],
     ]),
     'Summary'
   );
   (byDepartment || []).forEach(({ department, customers }) => {
     const data = customers.map((c) => ({
-      'Dates': (c.saleDates || []).join(', ') || '-',
+      'Dates': formatDisplayDates(c.saleDates),
       'Customer Name': c.name,
       'Department': c.department,
       'Employee Type': c.employeeType || '-',
@@ -132,26 +219,36 @@ export function getReportExcelBlob(byDepartment, grandTotal, startDate, endDate,
 function buildCustomerBillDoc(customer, startDate, endDate, saleTypeLabel) {
   const typeLabel = normalizeSaleTypeLabel(saleTypeLabel);
   const doc = new jsPDF();
-  doc.setFontSize(16);
-  doc.text(`Bill - ${customer.name} (${customer.department})`, 14, 22);
-  doc.setFontSize(10);
-  doc.text(`Sale Type: ${typeLabel}`, 14, 30);
-  doc.text(`Period: ${startDate} to ${endDate}`, 14, 37);
-  doc.text(`Total: Nu ${(customer.totalAmount || 0).toFixed(2)}`, 14, 44);
+  doc.setFont('helvetica', 'normal');
+
+  const startY = drawReportHeader(doc, {
+    title: 'Customer Bill',
+    metaLines: [
+      `Customer: ${customer.name || '—'} (${customer.department || '—'})`,
+      `Sale type: ${typeLabel}`,
+      `Period: ${formatDisplayDate(startDate)} to ${formatDisplayDate(endDate)}`,
+      `Total: ${formatMoney(customer.totalAmount)}`,
+    ],
+  });
 
   const head = ['Date', 'Items', 'Total (Nu)'];
   const body = (customer.transactions || []).map((txn) => [
-    txn.date,
-    (txn.items || []).map((i) => `${i.mealName} x${i.quantity} (Nu ${(i.subtotal || 0).toFixed(2)})`).join(', ') || '-',
-    `Nu ${(txn.totalAmount || 0).toFixed(2)}`,
+    formatDisplayDate(txn.date),
+    (txn.items || [])
+      .map((i) => `${i.mealName} x${i.quantity} (${formatMoney(i.subtotal || 0)})`)
+      .join(', ') || '-',
+    formatMoney(txn.totalAmount),
   ]);
 
   doc.autoTable({
     head: [head],
     body,
-    startY: 52,
-    theme: 'grid',
-    headStyles: { fillColor: [244, 0, 9] },
+    startY,
+    margin: { left: MARGIN, right: MARGIN },
+    ...cleanTableTheme,
+    columnStyles: {
+      2: { halign: 'right' },
+    },
   });
 
   return doc;
@@ -171,7 +268,7 @@ export function downloadCustomerBillExcel(customer, startDate, endDate, saleType
   const typeLabel = normalizeSaleTypeLabel(saleTypeLabel);
   const data = (customer.transactions || []).map((txn) => ({
     'Sale Type': typeLabel,
-    'Date': txn.date,
+    'Date': formatDisplayDate(txn.date),
     'Items': (txn.items || []).map((i) => `${i.mealName} x${i.quantity} (Nu ${(i.subtotal || 0).toFixed(2)})`).join(', ') || '-',
     'Total (Nu)': (txn.totalAmount || 0).toFixed(2),
   }));
@@ -194,7 +291,7 @@ export function getCustomerBillExcelBlob(customer, startDate, endDate, saleTypeL
   const typeLabel = normalizeSaleTypeLabel(saleTypeLabel);
   const data = (customer.transactions || []).map((txn) => ({
     'Sale Type': typeLabel,
-    'Date': txn.date,
+    'Date': formatDisplayDate(txn.date),
     'Items': (txn.items || []).map((i) => `${i.mealName} x${i.quantity} (Nu ${(i.subtotal || 0).toFixed(2)})`).join(', ') || '-',
     'Total (Nu)': (txn.totalAmount || 0).toFixed(2),
   }));

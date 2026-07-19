@@ -668,6 +668,7 @@ export function AdminPayments() {
 export function AdminSettings() {
   const [settings, setSettings] = useState(null);
   const [message, setMessage] = useState('');
+  const [messageSeverity, setMessageSeverity] = useState('success');
 
   useEffect(() => {
     getPlatformSettings().then(setSettings);
@@ -677,9 +678,11 @@ export function AdminSettings() {
     try {
       const updated = await updatePlatformSettings(settings);
       setSettings(updated);
+      setMessageSeverity('success');
       setMessage('Settings saved.');
     } catch (err) {
-      setMessage(err.message);
+      setMessageSeverity('error');
+      setMessage(err.message || 'Failed to save settings.');
     }
   };
 
@@ -697,7 +700,11 @@ export function AdminSettings() {
       <Typography variant="h5" fontWeight={700} gutterBottom>
         Platform Settings
       </Typography>
-      {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage('')}>{message}</Alert>}
+      {message && (
+        <Alert severity={messageSeverity} sx={{ mb: 2 }} onClose={() => setMessage('')}>
+          {message}
+        </Alert>
+      )}
 
       <Paper sx={{ p: 3, borderRadius: 3, maxWidth: 600 }}>
         <Typography variant="h6" gutterBottom>Plan Prices (Nu.)</Typography>
@@ -755,6 +762,36 @@ export function AdminSettings() {
             ? 'Clients currently see and can activate the 14-day free trial plan (only if also enabled for that client).'
             : 'The free trial plan is hidden from all clients until you enable it again. Per-client toggles on Manage Clients are ignored while this is off.'}
         </Typography>
+
+        <Typography variant="h6" gutterBottom>Contact Us (shown to clients)</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          These details appear on the Contact Us page in each client&apos;s sidebar.
+        </Typography>
+        <TextField
+          fullWidth
+          label="Contact Name"
+          value={settings.contactName || ''}
+          onChange={(e) => setSettings({ ...settings, contactName: e.target.value })}
+          placeholder="e.g. Codewyn Dev"
+          sx={{ mb: 2 }}
+        />
+        <TextField
+          fullWidth
+          label="WhatsApp Number"
+          value={settings.contactWhatsapp || ''}
+          onChange={(e) => setSettings({ ...settings, contactWhatsapp: e.target.value })}
+          placeholder="e.g. +975 17XXXXXX"
+          sx={{ mb: 2 }}
+        />
+        <TextField
+          fullWidth
+          label="Email Address"
+          type="email"
+          value={settings.contactEmail || ''}
+          onChange={(e) => setSettings({ ...settings, contactEmail: e.target.value })}
+          placeholder="e.g. support@example.com"
+          sx={{ mb: 3 }}
+        />
 
         <Typography variant="h6" gutterBottom>Mobile Pay Details</Typography>
         <TextField

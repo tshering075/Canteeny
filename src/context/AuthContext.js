@@ -3,7 +3,7 @@ import * as userService from '../services/userService';
 import * as tenantService from '../services/tenantService';
 import { addActivity } from '../services/activityService';
 import { STORAGE_KEYS } from '../services/storage';
-import { setCurrentTenantId } from '../services/tenantScope';
+import { setCurrentTenantId, getCurrentTenantId } from '../services/tenantScope';
 import { isSubscriptionActive } from '../services/subscriptionService';
 
 const AuthContext = createContext(null);
@@ -96,13 +96,14 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(() => {
     const who = currentUser?.userId || 'Unknown';
+    const tenantId = currentUser?.tenantId || getCurrentTenantId();
     setCurrentUser(null);
     setTenant(null);
     setIsAuthenticated(false);
     setCurrentTenantId(null);
     setSession(null);
-    addActivity(who, 'Logged out');
-  }, [currentUser?.userId]);
+    addActivity(who, 'Logged out', tenantId);
+  }, [currentUser?.userId, currentUser?.tenantId]);
 
   const getUsers = useCallback(() => userService.getUsers(currentUser?.tenantId), [currentUser?.tenantId]);
   const createUser = useCallback((data) => userService.createUser({ ...data, tenantId: currentUser?.tenantId }), [currentUser?.tenantId]);
