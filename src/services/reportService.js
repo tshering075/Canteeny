@@ -106,6 +106,7 @@ export function getMonthlyReportByCustomerDateRange(
     if (!salesByCustomer[key]) salesByCustomer[key] = [];
     salesByCustomer[key].push({
       date: sale.date,
+      saleNote: sale.saleNote || '',
       items: (sale.items || []).map((i) => ({
         mealName: i.mealName || 'Unknown',
         quantity: Number(i.quantity) || 1,

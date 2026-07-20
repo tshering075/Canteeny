@@ -39,6 +39,7 @@ const toSale = (row) =>
         paymentType: resolveSaleType(row),
         couponId: row.coupon_id ?? row.couponId ?? null,
         couponName: row.coupon_name ?? row.couponName ?? null,
+        saleNote: row.sale_note ?? row.saleNote ?? '',
         tenantId: row.tenant_id || null,
         createdAt: row.created_at,
       }
@@ -89,6 +90,7 @@ function buildSalePayload(data) {
     payment_type: normalizePaymentType(data.paymentType),
     coupon_id: data.couponId || null,
     coupon_name: data.couponName || null,
+    sale_note: data.saleNote || null,
     tenant_id: tenantId || null,
   };
 }
@@ -158,6 +160,7 @@ export async function getSales() {
         paymentType: resolveSaleType(s),
         couponId: s.couponId ?? null,
         couponName: s.couponName ?? null,
+        saleNote: s.saleNote ?? '',
       }));
     }
   }
@@ -168,6 +171,7 @@ export async function getSales() {
     paymentType: resolveSaleType(s),
     couponId: s.couponId ?? null,
     couponName: s.couponName ?? null,
+    saleNote: s.saleNote ?? '',
   }));
 }
 
@@ -228,6 +232,10 @@ export async function addSale(data) {
       stripMissing('tenant_id');
       await retryInsert();
     }
+    if (error && insertPayload.sale_note && isMissingColumnError(error, 'sale_note')) {
+      stripMissing('sale_note');
+      await retryInsert();
+    }
     if (error) throw new Error(error.message);
 
     const sale = toSale(row);
@@ -240,6 +248,7 @@ export async function addSale(data) {
           : normalizePaymentType(data.paymentType ?? sale.paymentType),
       couponId: data.couponId ?? sale.couponId,
       couponName: data.couponName ?? sale.couponName,
+      saleNote: data.saleNote ?? sale.saleNote ?? '',
     };
   }
 
@@ -254,6 +263,7 @@ export async function addSale(data) {
     paymentType: payload.payment_type,
     couponId: payload.coupon_id,
     couponName: payload.coupon_name,
+    saleNote: data.saleNote || '',
     tenantId: payload.tenant_id,
     createdAt: new Date().toISOString(),
   };

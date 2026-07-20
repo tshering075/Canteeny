@@ -57,10 +57,11 @@ import {
   downloadCustomerBillExcel,
 } from '../utils/exportReport';
 import { formatDisplayDate, formatDisplayDates } from '../utils/dateFormat';
+import SaleAnnotations from '../components/SaleAnnotations';
 
 function Reports() {
   const { sales, customers, refreshData } = useAppState();
-  const { canManageUsers, currentUser } = useAuth();
+  const { canManageUsers, currentUser, tenant } = useAuth();
   const [mode, setMode] = useState('daily');
   const [saleTypeTab, setSaleTypeTab] = useState('credit');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -210,22 +211,60 @@ function Reports() {
     }
   };
 
-  const handleReportSave = (format) => {
+  const handleReportSave = async (format) => {
     setSaveMenuAnchor(null);
-    if (format === 'pdf') {
-      downloadReportPDF(filteredByDepartment, filteredGrandTotal, startDate, endDate, saleTypeLabel);
-    } else {
-      downloadReportExcel(filteredByDepartment, filteredGrandTotal, startDate, endDate, saleTypeLabel);
+    const tenantName = tenant?.name || '';
+    try {
+      if (format === 'pdf') {
+        await downloadReportPDF(
+          filteredByDepartment,
+          filteredGrandTotal,
+          startDate,
+          endDate,
+          saleTypeLabel,
+          tenantName
+        );
+      } else {
+        downloadReportExcel(
+          filteredByDepartment,
+          filteredGrandTotal,
+          startDate,
+          endDate,
+          saleTypeLabel,
+          tenantName
+        );
+      }
+    } catch (err) {
+      console.error('Failed to export report:', err);
+      window.alert(err.message || 'Failed to export report. Please try again.');
     }
   };
 
-  const handleBillSave = (format) => {
+  const handleBillSave = async (format) => {
     if (!detailCustomer) return;
     setBillSaveMenuAnchor(null);
-    if (format === 'pdf') {
-      downloadCustomerBillPDF(detailCustomer, startDate, endDate, saleTypeLabel);
-    } else {
-      downloadCustomerBillExcel(detailCustomer, startDate, endDate, saleTypeLabel);
+    const tenantName = tenant?.name || '';
+    try {
+      if (format === 'pdf') {
+        await downloadCustomerBillPDF(
+          detailCustomer,
+          startDate,
+          endDate,
+          saleTypeLabel,
+          tenantName
+        );
+      } else {
+        downloadCustomerBillExcel(
+          detailCustomer,
+          startDate,
+          endDate,
+          saleTypeLabel,
+          tenantName
+        );
+      }
+    } catch (err) {
+      console.error('Failed to export bill:', err);
+      window.alert(err.message || 'Failed to export bill. Please try again.');
     }
   };
 
@@ -451,11 +490,7 @@ function Reports() {
                         </TableCell>
                         <TableCell>
                           {sale.customerName}
-                          {sale.couponName ? (
-                            <Typography variant="caption" display="block" color="text.secondary">
-                              Coupon: {sale.couponName}
-                            </Typography>
-                          ) : null}
+                          <SaleAnnotations sale={sale} />
                         </TableCell>
                         <TableCell>
                           {(sale.items || [])
@@ -505,11 +540,7 @@ function Reports() {
                           <TableCell>{formatDisplayDate(sale.date)}</TableCell>
                           <TableCell>
                             {sale.customerName}
-                            {sale.couponName ? (
-                              <Typography variant="caption" display="block" color="text.secondary">
-                                Coupon: {sale.couponName}
-                              </Typography>
-                            ) : null}
+                            <SaleAnnotations sale={sale} />
                           </TableCell>
                           <TableCell>
                             {(sale.items || [])
@@ -727,7 +758,18 @@ function Reports() {
                             Nu {(item.subtotal ?? (item.quantity * item.unitPrice || 0)).toFixed(2)}
                           </TableCell>
                           <TableCell align="right" sx={{ verticalAlign: 'top' }}>
-                            {itemIdx === 0 ? `Nu ${(txn.totalAmount || 0).toFixed(2)}` : ''}
+                            {itemIdx === 0 ? (
+                              <>
+                                {`Nu ${(txn.totalAmount || 0).toFixed(2)}`}
+                                {txn.saleNote ? (
+                                  <Typography variant="caption" display="block" color="text.secondary">
+                                    {txn.saleNote}
+                                  </Typography>
+                                ) : null}
+                              </>
+                            ) : (
+                              ''
+                            )}
                           </TableCell>
                         </TableRow>
                       ));

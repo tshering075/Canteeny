@@ -53,6 +53,8 @@ import { useAppState } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import * as salesService from '../services/salesService';
 import { addActivity } from '../services/activityService';
+import { getCouponValue, splitCartByCouponValue } from '../utils/couponSaleSplit';
+import SaleAnnotations, { balanceAfterCouponNote } from '../components/SaleAnnotations';
 
 function getSaleType(sale) {
   if (sale?.paymentType === 'cash') return 'cash';
@@ -243,6 +245,22 @@ function Sales() {
 
   const totalAmount = cart.reduce((sum, c) => sum + c.subtotal, 0);
 
+  const couponValue = useMemo(
+    () => (couponApplied ? getCouponValue(selectedCoupon) : 0),
+    [couponApplied, selectedCoupon]
+  );
+
+  const couponSplit = useMemo(() => {
+    if (!couponApplied || cart.length === 0) {
+      return { couponTotal: 0, creditTotal: 0, hasCreditBalance: false };
+    }
+    const split = splitCartByCouponValue(cart, couponValue);
+    return {
+      ...split,
+      hasCreditBalance: split.creditTotal > 0,
+    };
+  }, [cart, couponApplied, couponValue]);
+
   const handleRemoveItemFromSale = async (sale, itemIndex) => {
     const newItems = (sale.items || []).filter((_, i) => i !== itemIndex);
     if (newItems.length === 0) {
@@ -312,36 +330,74 @@ function Sales() {
 
   const handleRecordSale = async (paymentType) => {
     if (cart.length === 0 || recordingSale) return;
-    // Coupon-applied credit sales are stored as coupon (not credit).
-    const resolvedType =
-      paymentType === 'cash' ? 'cash' : couponApplied ? 'coupon' : paymentType;
-    if (resolvedType === 'coupon' && !couponApplied) return;
+    if (paymentType === 'coupon' && !couponApplied) return;
 
-    const typeLabel = saleTypeLabel(resolvedType).toLowerCase();
+    const customerLabel = customer ? `${customer.name} (${customer.department})` : 'Walk-in';
+    const customerName = customer ? customer.name : 'Walk-in';
+    const baseSale = {
+      customerId: customer?.id || null,
+      customerName: customerLabel,
+      date: saleDate,
+    };
+
     setRecordingSale(true);
     try {
-      await salesService.addSale({
-        customerId: customer?.id || null,
-        customerName: customer ? `${customer.name} (${customer.department})` : 'Walk-in',
-        items: cart,
-        date: saleDate,
-        paymentType: resolvedType,
-        couponId: couponApplied ? selectedCoupon.id : null,
-        couponName: couponApplied ? selectedCoupon.name : null,
-      });
-      addActivity(
-        currentUser?.userId || 'Unknown',
-        `Recorded ${typeLabel} sale: Nu ${totalAmount.toFixed(2)} to ${customer ? customer.name : 'Walk-in'}${
-          couponApplied ? ` (coupon: ${selectedCoupon.name})` : ''
-        }`
-      );
+      if (paymentType === 'coupon') {
+        const { couponItems, creditItems, couponTotal, creditTotal } = splitCartByCouponValue(
+          cart,
+          couponValue
+        );
+
+        await salesService.addSale({
+          ...baseSale,
+          items: couponItems,
+          paymentType: 'coupon',
+          couponId: selectedCoupon.id,
+          couponName: selectedCoupon.name,
+        });
+
+        addActivity(
+          currentUser?.userId || 'Unknown',
+          `Recorded coupon sale: Nu ${couponTotal.toFixed(2)} to ${customerName} (coupon: ${selectedCoupon.name})`
+        );
+
+        if (creditItems.length > 0 && creditTotal > 0) {
+          await salesService.addSale({
+            ...baseSale,
+            items: creditItems,
+            paymentType: 'credit',
+            couponId: null,
+            couponName: null,
+            saleNote: balanceAfterCouponNote(selectedCoupon.name),
+          });
+          addActivity(
+            currentUser?.userId || 'Unknown',
+            `Recorded credit sale: Nu ${creditTotal.toFixed(2)} to ${customerName} (balance after coupon: ${selectedCoupon.name})`
+          );
+        }
+
+        setHistoryDate(saleDate);
+        setHistorySaleType(creditTotal > 0 ? 'credit' : 'coupon');
+      } else {
+        await salesService.addSale({
+          ...baseSale,
+          items: cart,
+          paymentType,
+          couponId: null,
+          couponName: null,
+        });
+        addActivity(
+          currentUser?.userId || 'Unknown',
+          `Recorded ${saleTypeLabel(paymentType).toLowerCase()} sale: Nu ${totalAmount.toFixed(2)} to ${customerName}`
+        );
+        setHistoryDate(saleDate);
+        setHistorySaleType(paymentType);
+      }
+
       setCart([]);
       setCustomer(null);
       setSelectedCouponId('');
       setApplyCoupon(false);
-      // Match history filters to the sale just recorded.
-      setHistoryDate(saleDate);
-      setHistorySaleType(resolvedType);
       refreshData();
     } catch (err) {
       console.error('Failed to record sale:', err);
@@ -365,28 +421,35 @@ function Sales() {
   return (
     <Box sx={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
       <Stack spacing={3}>
-        <Grid
-          container
-          spacing={3}
-          alignItems="stretch"
-          sx={{ width: '100%', mt: -2, ml: -1.5, mr: 0.5 }}
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
+            gap: 2.5,
+            alignItems: 'stretch',
+            width: '100%',
+            mt: -3.5,
+            ml: { xs: 0, md: -1 },
+            boxSizing: 'border-box',
+          }}
         >
           {/* ── New Sale ── */}
-          <Grid item xs={12} md={6} sx={{ minWidth: 0 }}>
-            <Paper
-              variant="outlined"
-              elevation={0}
-              sx={{
-                p: 0,
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                borderRadius: 3,
-                border: '1px solid',
-                borderColor: 'divider',
-                overflow: 'hidden',
-              }}
-            >
+          <Paper
+            variant="outlined"
+            elevation={0}
+            sx={{
+              p: 0,
+              minWidth: 0,
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              borderRadius: 3,
+              border: '1px solid',
+              borderColor: 'divider',
+              overflow: 'hidden',
+            }}
+          >
               <Box sx={{ px: 3, py: 2, bgcolor: 'primary.main', color: 'primary.contrastText' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                   <PointOfSaleIcon />
@@ -531,25 +594,25 @@ function Sales() {
                   )}
                 </Box>
               </Box>
-            </Paper>
-          </Grid>
+          </Paper>
 
           {/* ── Cart ── */}
-          <Grid item xs={12} md={6} sx={{ minWidth: 0 }}>
-            <Paper
-              variant="outlined"
-              elevation={0}
-              sx={{
-                p: 0,
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                borderRadius: 3,
-                border: '1px solid',
-                borderColor: 'divider',
-                overflow: 'hidden',
-              }}
-            >
+          <Paper
+            variant="outlined"
+            elevation={0}
+            sx={{
+              p: 0,
+              minWidth: 0,
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              borderRadius: 3,
+              border: '1px solid',
+              borderColor: 'divider',
+              overflow: 'hidden',
+            }}
+          >
               <Box sx={{ px: 3, py: 2, borderBottom: 1, borderColor: 'divider' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                   <ShoppingCartIcon color="primary" />
@@ -677,10 +740,17 @@ function Sales() {
                       label="Apply coupon for free item(s)"
                     />
                     {couponApplied && selectedCoupon && (
-                      <Typography variant="caption" color="text.secondary">
+                      <Typography variant="caption" color="text.secondary" display="block">
                         Coupon covers {selectedCoupon.quantity} item(s) at Nu{' '}
-                        {Number(selectedCoupon.rate).toFixed(2)} each (value Nu{' '}
-                        {(Number(selectedCoupon.quantity) * Number(selectedCoupon.rate)).toFixed(2)})
+                        {Number(selectedCoupon.rate).toFixed(2)} each (value Nu {couponValue.toFixed(2)}
+                        ).
+                        {couponSplit.hasCreditBalance ? (
+                          <>
+                            {' '}
+                            Nu {couponSplit.couponTotal.toFixed(2)} will be recorded as coupon sale and Nu{' '}
+                            {couponSplit.creditTotal.toFixed(2)} as credit sale.
+                          </>
+                        ) : null}
                       </Typography>
                     )}
                   </>
@@ -733,9 +803,8 @@ function Sales() {
                   )}
                 </Stack>
               </Box>
-            </Paper>
-          </Grid>
-        </Grid>
+          </Paper>
+        </Box>
 
         {/* ── Sales History ── */}
         <Box>
@@ -885,11 +954,7 @@ function Sales() {
                           }}
                         >
                           {sale.customerName}
-                          {sale.couponName ? (
-                            <Typography variant="caption" display="block" color="text.secondary">
-                              Coupon: {sale.couponName}
-                            </Typography>
-                          ) : null}
+                          <SaleAnnotations sale={sale} />
                         </TableCell>
                         <TableCell align="center">
                           <Chip
@@ -950,6 +1015,7 @@ function Sales() {
               {selectedSale?.customerName} · {selectedSale?.date} ·{' '}
               {saleTypeLabel(getSaleType(selectedSale))}
               {selectedSale?.couponName ? ` · Coupon: ${selectedSale.couponName}` : ''}
+              {selectedSale?.saleNote ? ` · ${selectedSale.saleNote}` : ''}
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
